@@ -1,0 +1,11 @@
+[project]
+name = "ai-chat-archive-backend"
+version = "0.1.0"
+description = "Python backend that ingests ChatGPT share links into Cloudflare D1."
+requires-python = ">=3.11"
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]

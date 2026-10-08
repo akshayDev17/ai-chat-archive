@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The AI Digest — Multiple Leads</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,300..700;1,6..72,300..600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#EEF1F8; --paper-2:#E2E8F4; --ink:#0F1220; --muted:#525A6B;
+  --rule:#D3D9E6; --rule-2:#BCC4D6; --accent:#3A4BD8; --line:#818A9F;
+  --serif:"Newsreader",ui-serif,Georgia,serif;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#DCE1EE;color:var(--ink);font-family:var(--serif)}
+.wrap{max-width:1400px;margin:0 auto;padding:2.5rem 1.5rem 5rem}
+.cathead{border-bottom:3px double var(--ink);padding-bottom:1rem;margin-bottom:1.6rem}
+.cathead .k{font-family:var(--mono);font-size:.62rem;letter-spacing:.2em;text-transform:uppercase;color:var(--muted)}
+.cathead h1{font-size:clamp(1.8rem,4vw,2.7rem);line-height:1;font-weight:600;letter-spacing:-.02em;margin:.35rem 0}
+.cathead p{font-size:1.06rem;color:var(--muted);max-width:78ch;line-height:1.5}
+.opt{margin:2.6rem 0}
+.optlabel{font-family:var(--mono);font-size:.68rem;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:.6rem}
+.optlabel b{color:var(--ink)}
+
+.page{background:var(--paper);border:1px solid var(--rule-2);border-radius:5px;padding:1.4rem 1.6rem 1.8rem}
+
+/* masthead */
+.mh{display:flex;align-items:flex-end;justify-content:space-between;gap:1.5rem;flex-wrap:wrap;border-bottom:3px double var(--ink);padding-bottom:.7rem}
+.mh .name{font-size:2.2rem;font-weight:700;letter-spacing:-.03em;line-height:1}
+.mh .ed{font-family:var(--mono);font-size:.58rem;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-top:.3rem}
+.upload{display:flex;gap:.35rem;align-items:center}
+.upload input{font-family:var(--mono);font-size:.68rem;padding:.42rem .55rem;border:1px solid var(--line);border-radius:3px;width:235px;background:#fff;color:var(--ink)}
+.upload button{font-family:var(--mono);font-size:.64rem;letter-spacing:.04em;background:var(--ink);color:var(--paper);border:1px solid var(--ink);border-radius:3px;padding:.42rem .8rem;cursor:pointer}
+.upload .lb{font-family:var(--mono);font-size:.55rem;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.tagline{font-family:var(--mono);font-size:.56rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:.45rem 0 .9rem}
+
+/* atoms */
+.kicker{font-family:var(--mono);font-size:.55rem;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);margin-bottom:.28rem}
+h2.head{line-height:1.08;letter-spacing:-.022em;font-weight:600;margin:0 0 .35rem;text-wrap:balance}
+h3.head{font-size:.95rem;line-height:1.18;letter-spacing:-.012em;font-weight:600;margin:0 0 .25rem;text-wrap:balance}
+.by{font-family:var(--mono);font-size:.53rem;letter-spacing:.07em;text-transform:uppercase;color:var(--muted)}
+.tease{color:var(--muted);margin-top:.35rem;font-size:.84rem;line-height:1.5}
+.read{font-family:var(--mono);font-size:.54rem;letter-spacing:.07em;text-transform:uppercase;color:var(--accent);margin-top:.45rem;display:inline-block}
+article{cursor:pointer;transition:opacity .2s}
+article:hover{opacity:.8}
+
+/* briefs */
+.briefs{display:grid;grid-template-columns:repeat(3,1fr);border-bottom:1px solid var(--rule);margin-bottom:1rem}
+.brief{padding:.6rem .9rem;border-left:1px solid var(--rule)}
+.brief:first-child{border-left:0;padding-left:0}
+.brief h4{font-size:.8rem;font-weight:600;line-height:1.22}
+.brief p{font-size:.7rem;line-height:1.45;color:var(--muted);margin-top:.2rem}
+
+/* ── the leads row ── */
+.leads{display:grid;gap:0;border-bottom:3px double var(--ink);padding-bottom:1.1rem;margin-bottom:1.15rem}
+.leads-3{grid-template-columns:repeat(3,1fr)}
+.leads-2{grid-template-columns:repeat(2,1fr)}
+.lead{padding:0 1.25rem;border-left:1px solid var(--rule)}
+.lead:first-child{border-left:0;padding-left:0}
+.lead:last-child{padding-right:0}
+.leads-3 .lead h2.head{font-size:1.52rem}
+.leads-2 .lead h2.head{font-size:2.05rem}
+.leads-2 .lead .tease{font-size:.9rem}
+
+/* stepped: three leads, gently size-graded, none dominant */
+.stepped .lead:nth-child(1) h2.head{font-size:1.66rem}
+.stepped .lead:nth-child(2) h2.head{font-size:1.56rem}
+.stepped .lead:nth-child(3) h2.head{font-size:1.46rem}
+
+/* a lead that heads the flow instead of sitting in the row */
+.flow-lead{border-bottom:1px solid var(--ink);padding-bottom:.95rem;margin-bottom:.95rem}
+.flow-lead h2.head{font-size:1.7rem}
+
+/* ── ragged flowing columns ── */
+.flow{display:flex;align-items:flex-start}
+.fcol{flex:1 1 0;min-width:0;padding:0 1.05rem;border-left:1px solid var(--rule);display:flex;flex-direction:column}
+.fcol:first-child{border-left:0;padding-left:0}
+.fcol:last-child{padding-right:0}
+.fcol > article + article{border-top:1px solid var(--rule);margin-top:.95rem;padding-top:.95rem}
+
+@media (max-width:900px){
+  .leads-3,.leads-2{grid-template-columns:1fr}
+  .lead{border-left:0;padding:0 0 .9rem;border-bottom:1px solid var(--rule)}
+  .lead:last-child{border-bottom:0}
+  .briefs{grid-template-columns:1fr}
+  .brief{border-left:0;padding-left:0;border-top:1px solid var(--rule)}
+  .flow{flex-direction:column}
+  .fcol{border-left:0;padding:0;width:100%}
+  .upload input{width:100%}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="cathead">
+    <div class="k">The AI Digest · front page, third pass</div>
+    <h1>No single lead</h1>
+    <p>Two or three stories of comparable weight share the top of the page — none dominates. Below them, the columns still run to their own ragged depths. Five arrangements; all keep the theme, the full-width grid, and the paste box in the top-right.</p>
+  </header>
+
+  <!-- ══ 1 · THREE LANES ══ -->
+  <section class="opt">
+    <div class="optlabel"><b>1 · The Three Lanes</b> — three equal leads across the top, ruled apart, then four ragged columns</div>
+    <div class="page">
+      <div class="mh">
+        <div><div class="name">The AI Digest</div><div class="ed">Pune · Wednesday, October 8, 2026 · No. 14</div></div>
+        <form class="upload" onsubmit="return false"><span class="lb">Add</span><input type="text" placeholder="Paste a ChatGPT share link"><button>Import</button></form>
+      </div>
+      <div class="tagline">An AI conversation newspaper · the sessions, as stories</div>
+
+      <div class="leads leads-3">
+        <article class="lead"><div class="kicker">Lead</div><h2 class="head">India–US Trade Talks at a Plateau: Reading the Signals Behind the Public Statements</h2><div class="by">ChatGPT · 17 turns · 8 citations</div><p class="tease">Both sides call the talks ongoing; neither calls them failed. The full report on the October 1–5 sequence.</p><span class="read">Read the report →</span></article>
+        <article class="lead"><div class="kicker">Lead</div><h2 class="head">Greer Sounds Reassuring, Sitharaman Sounds Guarded</h2><div class="by">ChatGPT · 8 citations</div><p class="tease">A side-by-side reading of the two public framings, and what each is doing strategically.</p><span class="read">Read the report →</span></article>
+        <article class="lead"><div class="kicker">Lead</div><h2 class="head">Demeanour Is Not Leverage: Why Calm Is a Poor Proxy for Power</h2><div class="by">ChatGPT · 8 citations</div><p class="tease">Composure can be strength, patience, training — or a mask. The report separates the three.</p><span class="read">Read the report →</span></article>
+      </div>
+
+      <div class="flow">
+        <div class="fcol">
+          <article><h3 class="head">Reconstructing the Eleven-Day Turn</h3><div class="by">ChatGPT · 8 citations</div><p class="tease">Three statements, in order.</p></article>
+          <article><h3 class="head">What “Not Imminent” Is Doing in a Sentence</h3><div class="by">ChatGPT · 8 citations</div></article>
+        </div>
+        <div class="fcol">
+          <article><h3 class="head">Tariffs, Russian Oil and the Agriculture Sticking Points</h3><div class="by">ChatGPT · 8 citations</div><p class="tease">The named obstacles, and who raised each.</p></article>
+          <article><h3 class="head">An Emboldened India Holds Out</h3><div class="by">ChatGPT · 8 citations</div></article>
+          <article><h3 class="head">Caveats and Scope</h3><div class="by">ChatGPT · 8 citations</div></article>
+        </div>
+        <div class="fcol">
+          <article><h3 class="head">A Reading Guide to Negotiation Language</h3><div class="by">ChatGPT · 8 citations</div><p class="tease">What each phrase is doing where it appears.</p></article>
+          <article><h3 class="head">The Russian Crude Complication</h3><div class="by">ChatGPT · 8 citations</div></article>
+        </div>
+        <div class="fcol">
+          <article><h3 class="head">The Eight Sources, Footnoted</h3><div class="by">ChatGPT · 8 citations</div><p class="tease">Every claim traceable to a linked article.</p></article>
+          <article><h3 class="head">Where the Talks Stand Now</h3><div class="by">ChatGPT · 8 citations</div></article>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ 2 · TWO LEADS WIDE ══ -->
+  <section class="opt">
+    <div class="optlabel"><b>2 · The Two Leads</b> — two leads at half-width each, much larger type, then three ragged columns</div>
+    <div class="page">
+      <div class="mh">
+        <div><div class="name">The AI Digest</div><div class="ed">Pune · Wednesday, October 8, 2026</div></div>
+        <form class="upload" onsubmit="return false"><span class="lb">Add</span><input type="text" placeholder="Paste a ChatGPT share link"><button>Import</button></form>
+      </div>
+      <div class="tagline">An AI conversation newspaper · the sessions, as stories</div>
+
+      <div class="leads leads-2">
+        <article class="lead"><div class="kicker">Lead</div><h2 class="head">India–US Trade Talks at a Plateau: Reading the Signals Behind the Public Statements</h2><div class="by">ChatGPT · 17 turns · 8 citations</div><p class="tease">Both sides describe the talks as ongoing and neither says they have failed — yet the framing moved sharply in eleven days. The report separates what was reported, what was interpreted, and what cannot be inferred from tone at all.</p><span class="read">Read the report →</span></article>
+        <article class="lead"><div class="kicker">Lead</div><h2 class="head">Demeanour Is Not Leverage: Why Calm Is a Poor Proxy for Power</h2><div class="by">ChatGPT · 8 citations</div><p class="tease">Greer sounded reassuring and Sitharaman sounded guarded — but tone is not evidence of who holds the stronger hand. The report sets out what actually has to be assessed.</p><span class="read">Read the report →</span></article>
+      </div>
+
+      <div class="flow">
+        <div class="fcol">
+          <article><h3 class="head">Greer Sounds Reassuring, Sitharaman Sounds Guarded</h3><div class="by">ChatGPT · 8 citations</div><p class="tease">The two framings, compared.</p></article>
+          <article><h3 class="head">What “Not Imminent” Is Doing in a Sentence</h3><div class="by">ChatGPT · 8 citations</div></article>
+        </div>
+        <div class="fcol">
+          <article><h3 class="head">Reconstructing the Eleven-Day Turn</h3><div class="by">ChatGPT · 8 citations</div><p class="tease">From “done and dusted” to “plateau”.</p></article>
+          <article><h3 class="head">Tariffs, Russian Oil and Agriculture</h3><div class="by">ChatGPT · 8 citations</div><p class="tease">The named sticking points.</p></article>
+        </div>
+        <div class="fcol">
+          <article><h3 class="head">The Eight Sources, Footnoted</h3><div class="by">ChatGPT · 8 citations</div><p class="tease">Every claim traceable to a linked article.</p></article>
+          <article><h3 class="head">Caveats and Scope</h3><div class="by">ChatGPT · 8 citations</div></article>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ 3 · THREE LEADS + BRIEFS ══ -->
+  <section class="opt">
+    <div class="optlabel"><b>3 · The Three Leads, Under a Briefs Band</b> — a dated briefs strip leads the page, then three leads, then the flow</div>
+    <div class="page">
+      <div class="mh">
+        <div><div class="name">The AI Digest</div><div class="ed">Pune · Wednesday, October 8, 2026</div></div>
+        <form class="upload" onsubmit="return false"><span class="lb">Add</span><input type="text" placeholder="Paste a ChatGPT share link"><button>Import</button></form>
+      </div>
+      <div class="tagline">An AI conversation newspaper · the sessions, as stories</div>
+
+      <div class="briefs">
+        <div class="brief"><h4>Goyal: “done and dusted”</h4><p>24 September — a deal essentially settled, subject to acceptable terms.</p></div>
+        <div class="brief"><h4>Greer: “not imminent”</h4><p>1 October — constructive, but the remaining items are identifiable.</p></div>
+        <div class="brief"><h4>Sitharaman: a “plateau”</h4><p>5 October — further give-and-take “very, very difficult”.</p></div>
+      </div>
+
+      <div class="leads leads-3">
+        <article class="lead"><div class="kicker">Lead</div><h2 class="head">India–US Trade Talks at a Plateau</h2><div class="by">ChatGPT · 17 turns · 8 citations</div><p class="tease">Reading the signals behind the public statements, start to finish.</p><span class="read">Read the report →</span></article>
+        <article class="lead"><div class="kicker">Lead</div><h2 class="head">The Eleven-Day Turn, Reconstructed</h2><div class="by">ChatGPT · 8 citations</div><p class="tease">What changed between 24 September and 5 October.</p><span class="read">Read the report →</span></article>
+        <article class="lead"><div class="kicker">Lead</div><h2 class="head">Demeanour Is Not Leverage</h2><div class="by">ChatGPT · 8 citations</div><p class="tease">Why composure tells you almost nothing about power.</p><span class="read">Read the report →</span></article>
+      </div>
+
+      <div class="flow">
+        <div class="fcol">
+          <article><h3 class="head">Greer Sounds Reassuring, Sitharaman Sounds Guarded</h3><div class="by">ChatGPT · 8 citations</div></article>
+          <article><h3 class="head">Tariffs, Russian Oil and Agriculture</h3><div class="by">ChatGPT · 8 citations</div><p class="tease">The named sticking points.</p></article>
+        </div>
+        <div class="fcol">
+          <article><h3 class="head">A Reading Guide to Negotiation Language</h3><div class="by">ChatGPT · 8 citations</div><p class="tease">What each phrase is doing.</p></article>
+          <article><h3 class="head">The Russian Crude Complication</h3><div class="by">ChatGPT · 8 citations</div></article>
+        </div>
+        <div class="fcol">
+          <article><h3 class="head">The Eight Sources, Footnoted</h3><div class="by">ChatGPT · 8 citations</div><p class="tease">Every claim traceable to a linked article.</p></article>
+          <article><h3 class="head">Caveats and Scope</h3><div class="by">ChatGPT · 8 citations</div></article>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ 4 · STEPPED THREE ══ -->
+  <section class="opt">
+    <div class="optlabel"><b>4 · The Stepped Three</b> — three leads, gently size-graded (1.66 / 1.56 / 1.46rem) so the eye has rhythm without a dominant story</div>
+    <div class="page">
+      <div class="mh">
+        <div><div class="name">The AI Digest</div><div class="ed">Pune · Wednesday, October 8, 2026</div></div>
+        <form class="upload" onsubmit="return false"><span class="lb">Add</span><input type="text" placeholder="Paste a ChatGPT share link"><button>Import</button></form>
+      </div>
+      <div class="tagline">An AI conversation newspaper · the sessions, as stories</div>
+
+      <div class="leads leads-3 stepped">
+        <article class="lead"><div class="kicker">Lead</div><h2 class="head">India–US Trade Talks at a Plateau: Reading the Signals</h2><div class="by">ChatGPT · 17 turns · 8 citations</div><p class="tease">The full report, eight sources footnoted.</p><span class="read">Read the report →</span></article>
+        <article class="lead"><div class="kicker">Lead</div><h2 class="head">Greer Sounds Reassuring, Sitharaman Sounds Guarded</h2><div class="by">ChatGPT · 8 citations</div><p class="tease">Two framings, side by side.</p><span class="read">Read the report →</span></article>
+        <article class="lead"><div class="kicker">Lead</div><h2 class="head">Demeanour Is Not Leverage</h2><div class="by">ChatGPT · 8 citations</div><p class="tease">Composure is not evidence of power.</p><span class="read">Read the report →</span></article>
+      </div>
+
+      <div class="flow">
+        <div class="fcol">
+          <article><h3 class="head">Reconstructing the Eleven-Day Turn</h3><div class="by">ChatGPT · 8 citations</div><p class="tease">Three statements, in order.</p></article>
+          <article><h3 class="head">Caveats and Scope</h3><div class="by">ChatGPT · 8 citations</div></article>
+        </div>
+        <div class="fcol">
+          <article><h3 class="head">Tariffs, Russian Oil and the Agriculture Sticking Points</h3><div class="by">ChatGPT · 8 citations</div><p class="tease">Who raised each obstacle.</p></article>
+          <article><h3 class="head">An Emboldened India Holds Out</h3><div class="by">ChatGPT · 8 citations</div></article>
+        </div>
+        <div class="fcol">
+          <article><h3 class="head">A Reading Guide to Negotiation Language</h3><div class="by">ChatGPT · 8 citations</div><p class="tease">What each phrase is doing.</p></article>
+          <article><h3 class="head">The Eight Sources, Footnoted</h3><div class="by">ChatGPT · 8 citations</div><p class="tease">Every claim traceable.</p></article>
+        </div>
+        <div class="fcol">
+          <article><h3 class="head">Where the Talks Stand Now</h3><div class="by">ChatGPT · 8 citations</div><p class="tease">Ongoing, unresolved.</p></article>
+          <article><h3 class="head">The Russian Crude Complication</h3><div class="by">ChatGPT · 8 citations</div></article>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ 5 · TWO UP, THIRD HEADS THE FLOW ══ -->
+  <section class="opt">
+    <div class="optlabel"><b>5 · Two Up, the Third Heading the Flow</b> — two leads on the page top; the third lead opens the columns below, larger than its neighbours</div>
+    <div class="page">
+      <div class="mh">
+        <div><div class="name">The AI Digest</div><div class="ed">Pune · Wednesday, October 8, 2026</div></div>
+        <form class="upload" onsubmit="return false"><span class="lb">Add</span><input type="text" placeholder="Paste a ChatGPT share link"><button>Import</button></form>
+      </div>
+      <div class="tagline">An AI conversation newspaper · the sessions, as stories</div>
+
+      <div class="leads leads-2">
+        <article class="lead"><div class="kicker">Lead</div><h2 class="head">India–US Trade Talks at a Plateau: Reading the Signals Behind the Public Statements</h2><div class="by">ChatGPT · 17 turns · 8 citations</div><p class="tease">Both sides call the talks ongoing; neither calls them failed. Yet the framing moved sharply in eleven days.</p><span class="read">Read the report →</span></article>
+        <article class="lead"><div class="kicker">Lead</div><h2 class="head">Greer Sounds Reassuring, Sitharaman Sounds Guarded</h2><div class="by">ChatGPT · 8 citations</div><p class="tease">A direct comparison of the two public framings, in one table.</p><span class="read">Read the report →</span></article>
+      </div>
+
+      <article class="flow-lead">
+        <div class="kicker">Lead · continued below the fold</div>
+        <h2 class="head">Demeanour Is Not Leverage: Why Calm Is a Poor Proxy for Power</h2>
+        <div class="by">ChatGPT · 8 citations</div>
+        <p class="tease">Composure can reflect leverage, patience, preparation, or deliberate messaging — and it can also be a mask. The report separates demeanour, negotiating posture, and actual bargaining power.</p>
+        <span class="read">Read the report →</span>
+      </article>
+
+      <div class="flow">
+        <div class="fcol">
+          <article><h3 class="head">Reconstructing the Eleven-Day Turn</h3><div class="by">ChatGPT · 8 citations</div><p class="tease">Three statements, in order.</p></article>
+          <article><h3 class="head">What “Not Imminent” Is Doing in a Sentence</h3><div class="by">ChatGPT · 8 citations</div></article>
+        </div>
+        <div class="fcol">
+          <article><h3 class="head">Tariffs, Russian Oil and the Agriculture Sticking Points</h3><div class="by">ChatGPT · 8 citations</div><p class="tease">The named obstacles.</p></article>
+          <article><h3 class="head">An Emboldened India Holds Out</h3><div class="by">ChatGPT · 8 citations</div></article>
+        </div>
+        <div class="fcol">
+          <article><h3 class="head">The Eight Sources, Footnoted</h3><div class="by">ChatGPT · 8 citations</div><p class="tease">Every claim traceable to a linked article.</p></article>
+          <article><h3 class="head">Caveats and Scope</h3><div class="by">ChatGPT · 8 citations</div></article>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</div>
+</body>
+</html>
