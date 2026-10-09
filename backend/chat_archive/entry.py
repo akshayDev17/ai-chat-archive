@@ -32,58 +32,16 @@ from __future__ import annotations
 
 import json
 
-from js import Object, fetch  # FFI: JS fetch, used for outbound share-page requests
-from pyodide.ffi import to_js as _to_js
 from workers import Response, WorkerEntrypoint
 
 from .auth import CloudflareAccessIdentity
 from .chatgpt.decoder import ChatGptFlightDecoder
-from .chatgpt.fetcher import HttpShareFetcher
 from .chatgpt.parser import ChatGptParser
+from .chatgpt.socket_fetcher import SocketShareFetcher
 from .repository import D1ConversationRepository
 from .serializers import conversation_detail
 from .service import InvalidShareUrl, ShareService
 from .urls import first_param, path_of, query_of, safe_next
-
-
-def to_js(obj: object):
-    """Python object → JavaScript object.
-
-    Cloudflare's own example, and required before handing anything to a JS API:
-
-        # to_js converts between Python dictionaries and JavaScript Objects
-        def to_js(obj):
-            return _to_js(obj, dict_converter=Object.fromEntries)
-
-    https://developers.cloudflare.com/workers/languages/python/ffi/
-    """
-    return _to_js(obj, dict_converter=Object.fromEntries)
-
-
-async def worker_fetch(url: str, headers: dict | None = None, redirect: str = "follow"):
-    """`js.fetch`, adapted to the shape ``HttpShareFetcher`` calls.
-
-    The fetcher takes an injected fetch so it stays runtime-agnostic — the local
-    server injects a urllib one — and calls it as
-    ``fetch(url, headers={...}, redirect="follow")``. That is a *Python* calling
-    convention, and JS `fetch` does not have one: it takes ``(input, init)``, and
-    its `init` must be a real JS object.
-
-    Calling the raw `js.fetch` with those keyword arguments and a Python dict
-    does not raise a tidy TypeError at the call site. It kills the isolate:
-
-        TypeError: Incorrect type: the provided value is not of type 'Sequence'.
-        *** Fatal uncaught kj::Exception: abortIsolate() called, terminating
-        process; reason = Python worker fatal error
-
-    So the translation lives here, at the one place that knows it is talking to
-    JavaScript, rather than leaking `to_js` into the fetcher and making every
-    other runtime carry a Pyodide import it does not have.
-    """
-    init: dict = {"redirect": redirect}
-    if headers:
-        init["headers"] = headers
-    return await fetch(url, to_js(init))
 
 
 def _json(body: object, status: int = 200) -> Response:
@@ -104,7 +62,7 @@ class Default(WorkerEntrypoint):
 
     def _service(self) -> ShareService:
         return ShareService(
-            fetcher=HttpShareFetcher(worker_fetch),
+            fetcher=SocketShareFetcher(),
             decoder=ChatGptFlightDecoder(),
             parser=ChatGptParser(),
         )

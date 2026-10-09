@@ -1,4 +1,15 @@
-"""HTTP fetcher for ChatGPT share pages."""
+"""HTTP fetcher for ChatGPT share pages, for anywhere but a Worker.
+
+This is the *local* implementation of the ``ShareFetcher`` port —
+``local_server.py`` injects it. The Worker cannot use it: Cloudflare stamps
+every outbound subrequest with a ``Cf-Worker`` header, ChatGPT's edge refuses
+those with a 403, and the header cannot be suppressed. ``SocketShareFetcher``
+speaks HTTP over ``cloudflare:sockets`` instead; see
+``docs/worker-fetch-block.md``.
+
+Both implement the same port, so ``ShareService`` — and everything it depends
+on — is identical on either side.
+"""
 
 from __future__ import annotations
 

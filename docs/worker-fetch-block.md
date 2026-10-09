@@ -108,9 +108,46 @@ posting to the API. It sidesteps the block entirely, but it means the desk's
 
 **Ask OpenAI to allowlist** — not a plan.
 
-## What to check before trusting this
+## Built, and verified against the working path
 
-The socket path was proven for the *share page*. The same block will apply to
-anything else fetched from a Worker on our behalf, and the chunked-body handling
-is the part most likely to be subtly wrong — a truncated transcript would parse
-into a conversation that looks fine and is missing its last turns.
+`chat_archive/chatgpt/socket_fetcher.py` implements the port. `entry.py` injects
+it; `local_server.py` keeps `HttpShareFetcher`. Nothing else changed — the
+service, decoder, parser and repositories do not know which they were handed.
+
+The check that matters is not "does it return 200" but "is the transcript
+complete", because the failure mode of a botched chunked read is a page that
+parses perfectly and is short. Same session, both paths:
+
+| | Worker, over a socket | local Python, urllib |
+|---|---|---|
+| messages | 24 | 24 |
+| report | 13,636 chars | 13,636 chars |
+| sources | 15 | 15 |
+| transcript | 14,019 chars | 14,019 chars |
+
+Identical. The parsing itself is pure functions over bytes with tests in
+`test/test_socket_fetcher.py` — including the one that matters, a chunk
+promising more bytes than arrived must raise rather than return what it got.
+
+## Two things it got wrong first
+
+Both found by running it, not by reading it.
+
+**`build_request` returned `bytes` and was handed to `TextEncoder`, which takes
+a string.** It does not raise on bytes — it coerces with `str()` and sends the
+Python *repr*, so the server received `b'GET /share/… HTTP/1.1\r\n'` and
+answered **400**. It returns `str` now, and a test says so.
+
+**The request looked fine and still failed.** The first socket attempt returned
+400 rather than 403, which was progress and also a trap: it would have been easy
+to read that as "the socket approach does not work" and abandon it.
+
+## Still open
+
+The same block applies to anything else a Worker fetches on our behalf — if the
+archive later pulls from Gemini, Claude or Elicit, each of those fetches needs
+the socket path too. `FetchError` from a 403 should be the signal to reach for it.
+
+No timeout on the socket read. A stalled connection would rely on the Worker's
+own limits rather than failing cleanly, which is worth adding before this is
+under load.
