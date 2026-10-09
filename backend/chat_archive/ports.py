@@ -40,26 +40,35 @@ class ConversationParser(ABC):
 class ConversationRepository(ABC):
     """Persistence boundary for conversations.
 
-    The port is *owner-aware*: every read that returns a shelf of stories is
-    scoped to one reader's email, so a missing ``owner_email`` filter is a
-    signature error rather than a silent data leak. Only :meth:`get` may run
-    unscoped, because a single story is public once archived.
+    Ownership is *provenance*, not access control. Every row records who filed
+    it, and that is used to show a byline and to answer "what did I file?" — but
+    the edition is public, so the primary read is deliberately unscoped.
+
+    The port therefore offers two listings rather than one, and the names say
+    which is which: :meth:`list_all` is the public edition,
+    :meth:`list_recent` is one reader's own filings. There is no overload where
+    a missing argument silently widens the query.
     """
 
     @abstractmethod
     async def upsert(self, conversation: Conversation) -> None:
         """Insert or replace a conversation, its messages and its report.
 
-        The conversation's ``owner_email`` decides which shelf it lands on; an
-        empty owner is rejected by implementations rather than stored.
+        The conversation's ``owner_email`` records who filed it; an empty owner
+        is rejected by implementations rather than stored.
+        """
+
+    @abstractmethod
+    async def list_all(self, limit: int = 200) -> list[dict]:
+        """Every filed conversation, newest first — the public edition.
+
+        Deliberately not filtered by owner: the front page is the newspaper, and
+        everyone reads the same edition.
         """
 
     @abstractmethod
     async def list_recent(self, owner_email: str, limit: int = 200) -> list[dict]:
-        """Return ``owner_email``'s recent conversations, newest first.
-
-        This is the only way to enumerate stories, so it is always scoped.
-        """
+        """One reader's own filings, newest first — what the copy desk shows back."""
 
     @abstractmethod
     async def get(self, share_id: str, owner_email: str | None = None) -> Conversation | None:
@@ -67,5 +76,5 @@ class ConversationRepository(ABC):
 
         With ``owner_email`` set, only that reader's copy matches. With it left
         as ``None`` the lookup is the *public* one: a story reachable by its
-        permalink regardless of who archived it.
+        permalink regardless of who filed it.
         """

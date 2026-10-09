@@ -48,9 +48,19 @@ export async function whoami(): Promise<string | null> {
   }
 }
 
-/** The signed-in reader's own shelf. 401s when signed out — see FrontPage. */
+/**
+ * The public edition — every filed story, from every filer.
+ *
+ * No identity required: the front page is a newspaper, so it reads the same for
+ * everyone. Ownership is provenance (the credit line), not a filter.
+ */
 export function listSessions(): Promise<Session[]> {
   return request<SessionListResponse>('/api/sessions').then((d) => d.sessions);
+}
+
+/** What *you* filed. 401s when signed out — this is the copy desk's own read. */
+export function listFilings(): Promise<Session[]> {
+  return request<SessionListResponse>('/api/filings').then((d) => d.sessions);
 }
 
 /** A single story, public by permalink: no sign-in required. */
@@ -73,12 +83,12 @@ export function ingestSession(shareUrl: string): Promise<IngestResult> {
  * serves its one-time-PIN screen from `<team>.cloudflareaccess.com` — a
  * different domain — and only ever redirects a *navigation* there. A protected
  * `fetch()` instead receives a 302 that the browser follows as a GET, dropping
- * the request body; that is the silent import failure described in
- * `UploadInline.tsx`.
+ * the request body; that is the silent filing failure described in
+ * `CopyDesk.tsx`.
  *
  * In production the API is same-origin, so the `CF_Authorization` cookie —
  * which is scoped to the domain, not the path — is attached on the way back.
  */
-export function signInUrl(next = '/chat-archives'): string {
+export function signInUrl(next = '/chat-archives/desk'): string {
   return `${API_BASE}/api/session/start?next=${encodeURIComponent(next)}`;
 }

@@ -3,19 +3,22 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { whoami } from '@/lib/api';
-import UploadInline from './UploadInline';
 
 /**
- * The masthead's top-right slot, which is *state dependent*:
+ * The masthead's top-right slot — the only place auth is surfaced on the
+ * public pages.
  *
- *   signed out → a single Sign in affordance
- *   signed in  → the import box, plus who you are
+ *   signed out → Sign in
+ *   signed in  → Copy desk, plus who you are
  *
- * The import box is hidden when signed out rather than shown-and-rejected,
- * because "paste a link" is a promise this page cannot keep without an
- * identity. An <a> styled as a button is used for Sign in — it navigates, so
- * link semantics (middle-click, open-in-new-tab, screen-reader "link") are the
- * correct ones; a <button> that navigates is a small lie to the browser.
+ * There is deliberately no import box here any more. Filing copy is a
+ * different job from reading the paper, and it belongs on its own page: an
+ * input wedged into the nameplate was both cramped and permanently visible to
+ * people who could not use it.
+ *
+ * Sign in is an <a> styled as a button, not a <button>: it navigates, so link
+ * semantics (middle-click, open-in-new-tab, screen-reader "link") are the
+ * correct ones.
  */
 export default function MastheadActions() {
   const [email, setEmail] = useState<string | null>(null);
@@ -28,8 +31,7 @@ export default function MastheadActions() {
         if (!cancelled) setEmail(value);
       })
       .catch(() => {
-        // A backend that is down is not a reason to hide the sign-in link;
-        // treat it as signed out and let the page body report the real problem.
+        // The backend being down is not a reason to hide the sign-in link.
         if (!cancelled) setEmail(null);
       })
       .finally(() => {
@@ -55,10 +57,12 @@ export default function MastheadActions() {
 
   return (
     <div className="mh-actions">
-      <UploadInline />
       <span className="reader" title={email}>
         {email}
       </span>
+      <Link href="/chat-archives/desk" className="signin">
+        Copy desk <span aria-hidden="true">→</span>
+      </Link>
     </div>
   );
 }

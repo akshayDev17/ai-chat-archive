@@ -31,12 +31,23 @@ import Masthead from '../../components/Masthead';
  * The collision that the query parameter avoided is still avoided, for free:
  * share ids are UUIDs, so the static segment `login` can never be one, and
  * Next.js resolves static segments before dynamic ones.
+ *
+ * `?next` is read here (not on the front page) and handed to AuthFlow, which
+ * sanitizes it before navigating. A query parameter is the right shape for
+ * `next`, unlike for the route itself: it is a parameter of the flow, not a
+ * thing Access needs to scope.
  */
-export default function LoginPage() {
+export default async function LoginPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ next?: string }>;
+}) {
+  const { next } = await searchParams;
+
   return (
     <main className="frame">
       <Masthead section="Reader access" />
-      <AuthFlow />
+      <AuthFlow next={next} />
     </main>
   );
 }

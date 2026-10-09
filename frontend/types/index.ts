@@ -3,12 +3,14 @@ export interface Session {
   title: string;
   created_at: string;
   source: string;
+  /** Who filed it. Provenance, shown as a credit — not an access boundary. */
+  owner_email?: string | null;
   /** Raw markdown of the summary report (the "thumbnail"). */
   markdown?: string | null;
 }
 
 export interface SessionListResponse {
-  /** The reader whose shelf this is. Always present: the list is per-email. */
+  /** Present only on the owner-scoped `/api/filings` read. */
   owner?: string;
   sessions: Session[];
 }

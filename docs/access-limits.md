@@ -340,37 +340,47 @@ Two consequences worth stating plainly:
 
 ## What this means for us
 
-The three rules we settled on —
+One rule: **public reads, private writes.**
 
 | Action | Identity required |
 |---|---|
+| read the edition (the front page) | no |
 | read one story by `share-id` | no |
-| list a shelf | yes |
-| import a share link | yes |
+| file a share link | yes |
+| see your own filings | yes |
 
-— **cannot be delegated to Access**, because the listing and the import are the
-same method on a path prefix that also serves public reads, and Access has no
-method selector (§3). So they are enforced in `entry.py`.
+Only the last two rows are gated, and since they are the `POST` and the
+owner-scoped `GET`, they cannot be delegated to Access — it has no method
+selector (§3). So they are enforced in `entry.py`, and Access's role is the
+narrower one: produce the email, and make the filing path unreachable to
+strangers.
 
-Access's job, if we use it, is narrower: **it is the thing that produces the
-email**, and the thing that makes `/api/session/start` unreachable to strangers.
+The route split from §10 is what makes Access genuinely useful here, because it
+turns "the desk" into a single path that can carry a policy on its own:
+
+| Access application | Covers |
+|---|---|
+| `akshayprabhakant.com/chat-archives/desk` | **the only path worth protecting** |
+| `…/api/ingest` | the filing endpoint |
+| everything else | public, no policy needed |
 
 The remaining choice is only about where the code is typed:
 
-**Option A — Cloudflare sends the PIN (via the handoff above).**
-Our Rail screens stay as the entry point at `/chat-archives/login`; the
-navigation hands off to Access, which emails the code. No email provider, no
-auth code of ours. We must first verify Python exposes `ctx.access` (§8) or
-everything 401s. `AuthFlow`'s OTP/verifying/confirmed stages become redundant —
-Cloudflare owns them.
+**Option A — Cloudflare sends the PIN.**
+The desk's sign-in screen navigates to `/api/session/start`, Access catches it,
+the visitor types the code on Cloudflare's page, and lands back on the desk with
+the cookie set. No email provider, no auth code of ours. We must first verify
+Python exposes `ctx.access` (§8) or every filing 401s.
 
 **Option B — we send the PIN.**
 `AuthFlow` becomes real end to end and no undocumented Python Access API is on
 the critical path. Needs an email sender (Resend's free tier is the usual pick),
 because the Worker must mail the code.
 
-Either way, **per-email scoping stays our code**: Access can gate a path, but it
-can never filter a `SELECT` by owner. That is `conversations.owner_email`.
+Either way, **provenance is our code and stays our code**: Access can gate a
+path, but it can never record who filed what. That is
+`conversations.owner_email`, and it is what the front page credit line and the
+desk's "your recent filings" list read.
 
 ## Sources
 

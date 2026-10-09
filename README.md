@@ -6,21 +6,22 @@ a newspaper. See `plan.md` for the full design.
 
 ## Screenshots
 
-### The front page — signed in
+### The front page
 
 Sessions laid out as a newspaper front page: two leads above the fold, a third
 heading the flow beneath, then three columns that each run to their own ragged
-depth. The import box sits in the masthead, beside the reader's address.
+depth. **Public, and the same edition for everyone** — ownership is a credit
+line, not a filter. The only control in the masthead is Sign in.
 
 ![The front page](docs/screenshots/01-front-page.png)
 
-### The front page — signed out
+### The copy desk — `/chat-archives/desk`
 
-Stories are public; shelves are not. A visitor with no identity gets the
-masthead's Sign in chip and an explanation, rather than a misleading "no stories
-yet". Stories they were sent links to stay readable.
+Where a share link becomes a story. Reached by signing in, and gated: the
+filing endpoint is the only write in the product. It also shows your own recent
+filings, which is what the `owner_email` column is still for.
 
-![The front page, signed out](docs/screenshots/08-front-page-signed-out.png)
+![The copy desk](docs/screenshots/08-copy-desk.png)
 
 ### Reading a session — the report
 
@@ -56,19 +57,26 @@ chosen, a local server stands in for it.
 
 ## Who can see what
 
-| Route | Signed out | Signed in as the owner |
+| Route | Anyone | Signed in |
 |---|---|---|
+| `/chat-archives` — the edition | **every filed story** | same |
 | `/chat-archives/<share-id>` — one story | **readable** | readable |
-| `/chat-archives` — the front page | "sign in" screen | your shelf |
-| `/chat-archives/login` — the sign-in screen | screen | redirects to the shelf |
-| Importing a share link | hidden | available |
+| `/chat-archives/login` — sign in | screen | redirects to the desk |
+| `/chat-archives/desk` — file copy | redirected to sign in | the filing form |
 
-Ownership is a column (`conversations.owner_email`), not a URL prefix, so a
-story's permalink never contains an email address. The upsert key is
-`(owner_email, external_id)` — two readers may archive the same share link and
-each gets their own copy.
+One rule, stated once: **public reads, private writes.** The only gated actions
+are `POST /api/ingest` and `GET /api/filings`.
 
-### Why the sign-in screen has its own path
+Ownership is still recorded (`conversations.owner_email`) but it is *provenance,
+not an access boundary* — it drives the credit line and the desk's "your recent
+filings" list. The upsert key remains `(owner_email, external_id)`, so two people
+can file the same share link and both are in the edition.
+
+Provenance is also what makes the other sources cheap to add: `conversations.source`
+is already `chatgpt | gemini | claude | elicit`, and each becomes another
+implementation of the parser ports rather than a change to this model.
+
+### Why the copy desk and the sign-in screen have their own paths
 
 Cloudflare Access scopes an application by **path**, and a query string is not
 part of a path:
@@ -76,21 +84,20 @@ part of a path:
 > "Query strings (such as `?foo=bar`) are not supported in Access application
 > paths." — [Access application paths](https://developers.cloudflare.com/cloudflare-one/access-controls/policies/app-paths/)
 
-So `/chat-archives?login` was one Access-scoped URL with `/chat-archives`, and no
-rule could ever target it. As `/chat-archives/login` it is independently
-scopeable, and the wildcard rules separate all three routes:
+So `?desk` or `?login` can never be given their own policy. As real paths they
+can, and Access's wildcard rules separate all four routes:
 
 | Access application | Covers | Does not cover |
 |---|---|---|
-| `…/chat-archives` | the shelf | login, stories |
-| `…/chat-archives/*` | login, stories | the shelf |
-| `…/api/sessions` | the shelf API | `…/api/sessions/<id>` |
-| `…/api/sessions/*` | one public story | the shelf API |
+| `…/chat-archives` | the edition | login, desk, stories |
+| `…/chat-archives/login` | sign in | everything else |
+| `…/chat-archives/desk` | **filing — the one path to protect** | everything else |
+| `…/chat-archives/*` | login, desk, stories | the edition |
 
-The last two matter because Access has **no HTTP-method selector** at all (its
-documented selectors are emails, IPs, countries, device posture, IdP groups,
-service tokens — no verbs), so "public GET, private POST" is written in
-`entry.py`, not in a policy. `docs/access-limits.md` has the citations.
+Access has **no HTTP-method selector** at all (its documented selectors are
+emails, IPs, countries, device posture, IdP groups, service tokens — no verbs),
+so "public GET, private POST" is written in `entry.py`, not in a policy.
+`docs/access-limits.md` has the citations.
 
 ## Structure
 
@@ -109,6 +116,7 @@ backend/
 ├── chat_archive/
 │   ├── entry.py            # Workers entrypoint + composition root + routing
 │   ├── auth.py             # IdentityProvider port: who is asking?
+│   ├── urls.py             # path/query helpers + the open-redirect guard
 │   ├── ports.py            # interfaces (ABCs): ShareFetcher, PayloadDecoder,
 │   │                       #   ConversationParser, ConversationRepository
 │   ├── models.py           # domain dataclasses (Message, Citation, Conversation)
@@ -124,6 +132,7 @@ backend/
 ├── local_server.py         # runs the same service off-Cloudflare (stdlib only)
 ├── test/test_decode.py     # network test: decode + parse a real share link
 ├── test/test_ownership.py  # offline contract test: all 3 repositories agree
+├── test/test_urls.py       # offline: the open-redirect guard
 ├── schema.sql              # D1 schema
 ├── wrangler.jsonc          # Worker + D1 binding config
 └── pyproject.toml
@@ -151,15 +160,15 @@ frontend/
 │   ├── layout.tsx              # fonts + metadata
 │   ├── page.tsx                # NOT the archive — points at /chat-archives
 │   ├── globals.css             # the whole design system
-│   ├── chat-archives/page.tsx        # the front page
-│   ├── chat-archives/login/page.tsx   # the sign-in screen (own path)
+│   ├── chat-archives/page.tsx        # the edition (public)
+│   ├── chat-archives/login/page.tsx  # sign in (own path)
+│   ├── chat-archives/desk/page.tsx   # the copy desk — file a share link
 │   ├── chat-archives/[id]/page.tsx   # the reader (?chat for the transcript)
 │   └── components/
 │       ├── Masthead.tsx        # the nameplate
-│       ├── MastheadActions.tsx # top-right slot: Sign in, or import box
-│       ├── UploadInline.tsx    # paste-a-link form (signed-in only)
+│       ├── MastheadActions.tsx # top-right slot: Sign in, or Copy desk
 │       ├── FrontPage.tsx       # leads + ragged columns
-│       ├── SignedOut.tsx       # the front page when nobody is signed in
+│       ├── CopyDesk.tsx        # the filing form + your recent filings
 │       ├── StoryLink.tsx       # one story rendered as a link
 │       ├── SessionReader.tsx   # reader with the Report/Chat toggle
 │       └── AuthFlow.tsx        # email → code → verifying → confirmed
@@ -167,7 +176,8 @@ frontend/
 │   ├── api.ts                  # typed API client + ApiError/isSignInRequired
 │   ├── story.ts                # headline / standfirst / citation count
 │   ├── citations.ts            # links [n] markers to the bibliography
-│   └── chat.ts                 # strips source tokens, groups tool notes
+│   ├── chat.ts                 # strips source tokens, groups tool notes
+│   └── nav.ts                  # AFTER_SIGN_IN + safeNext (redirect guard)
 ├── types/index.ts
 ├── package.json
 └── tsconfig.json

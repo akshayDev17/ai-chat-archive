@@ -1,31 +1,27 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { isSignInRequired, listSessions } from '@/lib/api';
+import { listSessions } from '@/lib/api';
 import type { Session } from '@/types';
-import SignedOut from './SignedOut';
 import StoryLink from './StoryLink';
 
 const LEAD_SLOTS = 2; // two leads above the fold; the third heads the flow
 
+/**
+ * The edition. Public, and the same for everyone: there is no signed-out branch
+ * here any more, because there is nothing to hide — the front page is the
+ * newspaper and every filed story appears in it.
+ */
 export default function FrontPage() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [signedOut, setSignedOut] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
       setSessions(await listSessions());
-      setSignedOut(false);
       setError(null);
     } catch (e) {
-      if (isSignInRequired(e)) {
-        // Not an error: a visitor with no identity is an expected state.
-        setSignedOut(true);
-        setError(null);
-        return;
-      }
       setError(e instanceof Error ? e.message : 'Failed to load the edition');
     } finally {
       setLoading(false);
@@ -36,7 +32,8 @@ export default function FrontPage() {
     void refresh();
   }, [refresh]);
 
-  // UploadInline announces this after a successful import.
+  // The copy desk announces this after a successful filing, so the edition
+  // picks up a story filed in another tab without a reload.
   useEffect(() => {
     const onUpdated = () => void refresh();
     window.addEventListener('archive:updated', onUpdated);
@@ -55,10 +52,14 @@ export default function FrontPage() {
   }, [sessions]);
 
   if (loading) return <p className="fine">Printing the edition…</p>;
-  // Signed out beats the error/empty branches: "no stories yet" would be a lie
-  // to a visitor who simply cannot see the shelf.
-  if (signedOut) return <SignedOut />;
   if (error) return <div className="status error">{error}</div>;
+  if (sessions.length === 0) {
+    return (
+      <div className="empty">
+        No stories yet. Sign in and file a share link to set the first edition.
+      </div>
+    );
+  }
   if (sessions.length === 0) {
     return (
       <div className="empty">

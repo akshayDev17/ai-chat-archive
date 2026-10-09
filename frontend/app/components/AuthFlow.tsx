@@ -2,11 +2,20 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { AFTER_SIGN_IN, safeNext } from '@/lib/nav';
 
 type Stage = 'email' | 'otp' | 'verifying' | 'confirmed';
 
-export default function AuthFlow() {
+/**
+ * The sign-in flow, ending at the copy desk.
+ *
+ * `next` comes from the URL so a visitor bounced off the copy desk returns
+ * there. It is sanitized before being used as a navigation target — see
+ * `lib/nav.ts`.
+ */
+export default function AuthFlow({ next }: { next?: string | null }) {
   const router = useRouter();
+  const destination = safeNext(next);
   const [stage, setStage] = useState<Stage>('email');
   const [email, setEmail] = useState('');
   const [digits, setDigits] = useState<string[]>(Array(6).fill(''));
@@ -114,10 +123,10 @@ export default function AuthFlow() {
     <section>
       <div className="kicker">Reader access</div>
       <div className="check" aria-hidden="true">✓</div>
-      <h1 className="hl">Welcome back to the archive</h1>
-      <p className="standfirst">You are authenticated. Opening your sessions…</p>
-      <button type="button" className="btn" onClick={() => router.push('/chat-archives')}>
-        Enter the archive
+      <h1 className="hl">You are on the desk</h1>
+      <p className="standfirst">Signed in. The copy desk is open — file a share link to set it.</p>
+      <button type="button" className="btn" onClick={() => router.push(destination)}>
+        Open the copy desk
       </button>
     </section>
   );

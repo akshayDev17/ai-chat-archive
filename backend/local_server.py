@@ -10,9 +10,9 @@ D1 binding. Plain Python has neither, so this file adapts those seams:
 
 It reuses the exact same ports / service / parser / decoder / router semantics
 as the Worker, so what runs here is the real backend logic, just wired to local
-stand-ins. The public-read / private-archive split is enforced identically:
-``GET /api/sessions`` is 401 without an identity, ``GET /api/sessions/<id>`` is
-open to anyone.
+stand-ins. The public-read / private-filing split is enforced identically:
+``GET /api/sessions`` and ``GET /api/sessions/<id>`` are open to anyone, while
+``POST /api/ingest`` and ``GET /api/filings`` are 401 without an identity.
 
 Run:  python3 backend/local_server.py     (then hit http://127.0.0.1:8787)
 
@@ -183,6 +183,11 @@ class Handler(BaseHTTPRequestHandler):
             return self._redirect(safe_next(first_param(query, "next")))
 
         if path == "/api/sessions":
+            # Public: the edition is a newspaper, so the front page needs no
+            # identity. Owned by nobody in particular — every filer's copy.
+            return self._json({"sessions": asyncio.run(repo.list_all())})
+
+        if path == "/api/filings":
             email = self._identity()
             if not email:
                 return self._json({"error": "sign-in required"}, 401)

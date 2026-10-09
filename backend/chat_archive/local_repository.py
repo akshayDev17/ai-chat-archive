@@ -37,21 +37,33 @@ class MemoryConversationRepository(ConversationRepository):
                 return conversation
         return None
 
+    async def list_all(self, limit: int = 200) -> list[dict]:
+        """The public edition: every filed story, newest first, no owner filter."""
+        return self._rows(list(reversed(list(self._by_key.items()))), limit)
+
     async def list_recent(self, owner_email: str, limit: int = 200) -> list[dict]:
         owner = normalize_email(owner_email)
         if not owner:
             raise ValueError("list_recent requires an owner_email.")
 
+        matching = [
+            (key, conversation)
+            for key, conversation in reversed(list(self._by_key.items()))
+            if key[0] == owner
+        ]
+        return self._rows(matching, limit)
+
+    @staticmethod
+    def _rows(items, limit: int) -> list[dict]:
         rows: list[dict] = []
-        for (stored_owner, _), conversation in reversed(list(self._by_key.items())):
-            if stored_owner != owner:
-                continue
+        for (owner, _), conversation in items:
             rows.append(
                 {
                     "id": conversation.share_id,
                     "title": conversation.title,
                     "created_at": "",
                     "source": "chatgpt",
+                    "owner_email": owner,
                     "markdown": conversation.report,
                 }
             )

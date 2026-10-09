@@ -114,7 +114,22 @@ class OwnershipContract:
     def setUp(self):
         self.repo = self.make_repository()
 
-    # -- listing is scoped ---------------------------------------------------
+    # -- the public edition is unscoped --------------------------------------
+
+    def test_the_edition_shows_every_filer(self):
+        """The front page is a newspaper: everyone reads the same edition."""
+        asyncio.run(self.repo.upsert(conversation("share-a", "Akshay's story", AKSHAY)))
+        asyncio.run(self.repo.upsert(conversation("share-b", "Guest's story", GUEST)))
+
+        edition = asyncio.run(self.repo.list_all())
+        self.assertEqual({s["id"] for s in edition}, {"share-a", "share-b"})
+
+    def test_the_edition_records_who_filed_each_story(self):
+        """Ownership survives as provenance, even though it gates nothing now."""
+        asyncio.run(self.repo.upsert(conversation("share-a", "A story", AKSHAY)))
+        self.assertEqual(asyncio.run(self.repo.list_all())[0]["owner_email"], AKSHAY)
+
+    # -- your own filings stay scoped ----------------------------------------
 
     def test_list_is_scoped_to_the_owner(self):
         asyncio.run(self.repo.upsert(conversation("share-a", "Akshay's story", AKSHAY)))
@@ -126,17 +141,23 @@ class OwnershipContract:
         self.assertEqual([s["id"] for s in mine], ["share-a"])
         self.assertEqual([s["id"] for s in theirs], ["share-b"])
 
-    def test_unknown_owner_sees_an_empty_shelf(self):
+    def test_unknown_filer_sees_an_empty_list(self):
         asyncio.run(self.repo.upsert(conversation("share-a", "Akshay's story", AKSHAY)))
         self.assertEqual(asyncio.run(self.repo.list_recent("nobody@example.com")), [])
+        # ...but still reads the public edition.
+        self.assertEqual(len(asyncio.run(self.repo.list_all())), 1)
 
-    def test_the_same_share_link_can_live_on_two_shelves(self):
+    def test_the_same_share_link_can_be_filed_by_two_people(self):
         """The reason the unique key is (owner_email, external_id), not external_id."""
         asyncio.run(self.repo.upsert(conversation("shared-id", "As Akshay saw it", AKSHAY)))
         asyncio.run(self.repo.upsert(conversation("shared-id", "As the guest saw it", GUEST)))
 
         self.assertEqual(len(asyncio.run(self.repo.list_recent(AKSHAY))), 1)
         self.assertEqual(len(asyncio.run(self.repo.list_recent(GUEST))), 1)
+        # Both are in the edition; the public permalink resolves to one of them
+        # rather than 404ing.
+        self.assertEqual(len(asyncio.run(self.repo.list_all())), 2)
+        self.assertIsNotNone(asyncio.run(self.repo.get("shared-id")))
         self.assertEqual(
             asyncio.run(self.repo.get("shared-id", AKSHAY)).title, "As Akshay saw it"
         )
@@ -180,8 +201,14 @@ class OwnershipContract:
             asyncio.run(self.repo.upsert(conversation("share-a", "Orphan")))
 
     def test_list_recent_refuses_an_empty_owner(self):
+        # The *scoped* listing fails loudly on a lost identity. list_all is the
+        # public edition and deliberately has no such guard -- it is unscoped by
+        # design, so there is no identity for it to lose.
         with self.assertRaises(ValueError):
             asyncio.run(self.repo.list_recent(""))
+
+    def test_an_empty_edition_is_an_empty_list_not_an_error(self):
+        self.assertEqual(asyncio.run(self.repo.list_all()), [])
 
 
 # ------------------------------------------------------------ implementations

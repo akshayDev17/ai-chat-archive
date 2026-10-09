@@ -10,16 +10,22 @@ Two things this file has to get right:
    fetch(self, request)`` method, and ``self.env`` for bindings.
    https://developers.cloudflare.com/workers/languages/python/
 
-2. **Public reading, private archiving.** Stories are public — anyone holding a
-   share id can read one — while *listing* a shelf and *adding* to it require
-   an authenticated email. That split is enforced here, in the Worker, because
-   Cloudflare Access cannot express it: an Access policy has no HTTP-method
-   selector at all (the documented selector list is emails, IPs, countries,
-   device posture, identity-provider groups, service tokens — no verbs), and
-   Access application paths cannot contain query strings. So Access may sit in
-   front as an extra lock, but the authority for "may this caller see the front
-   page?" is this file, and the answer comes from an :class:`IdentityProvider`.
-   See ``docs/access-limits.md`` for the citations.
+2. **Public reading, private filing.** The archive is a newspaper: the front
+   page and every story are readable by anyone, with no identity at all. The
+   only gated actions are filing copy (``POST /api/ingest``) and seeing your own
+   filings. So the split is "public reads, private writes" — one rule, easy to
+   check, and expressed as two contiguous blocks in :meth:`Default.fetch`.
+
+   That split is enforced here, in the Worker, rather than in Cloudflare Access,
+   for two reasons. Access application paths cannot contain query strings, and
+   an Access policy has no HTTP-method selector at all (the documented selectors
+   are emails, IPs, countries, device posture, identity-provider groups and
+   service tokens — no verbs). See ``docs/access-limits.md`` for the citations.
+
+   Ownership survives as *provenance*: every row records who filed it, which
+   drives the `source`/byline on the front page and the copy desk's "your
+   filings" list. It is no longer an access boundary, because there is no longer
+   a boundary to draw — everyone reads the same edition.
 """
 
 from __future__ import annotations
@@ -78,19 +84,30 @@ class Default(WorkerEntrypoint):
             return await self._health()
 
         # -- public -----------------------------------------------------------
-        # A single story is reachable by its permalink with no identity at all.
+        # Reading is entirely public: the edition is a newspaper, so every story
+        # and the front page itself are readable without an identity.
+        if path.endswith("/api/whoami"):
+            identity = await self._identity_provider().identify(request)
+            if identity is None:
+                return _json({"error": "sign-in required"}, status=401)
+            return _json({"email": identity.email})
+
+        if path.endswith("/api/sessions") and method == "GET":
+            return await self._edition()
+
         if "/api/sessions/" in path and method == "GET":
             return await self._read_story(path.rsplit("/", 1)[-1])
 
         # -- protected --------------------------------------------------------
-        # Everything below needs an email, because it either reveals a shelf or
-        # writes to one.
+        # Everything below files copy (or asks who you are as a filer), so it
+        # needs an email. None of it is reading, which is why the split is
+        # legible: public reads, private writes.
         identity = await self._identity_provider().identify(request)
         if identity is None:
             return _json({"error": "sign-in required"}, status=401)
 
-        if path.endswith("/api/sessions") and method == "GET":
-            return await self._list_shelf(identity)
+        if path.endswith("/api/filings") and method == "GET":
+            return await self._filings(identity)
 
         if path.endswith("/api/ingest") and method == "POST":
             return await self._ingest(request, identity)
@@ -150,7 +167,17 @@ class Default(WorkerEntrypoint):
             }
         )
 
-    async def _list_shelf(self, identity) -> Response:
+    async def _edition(self) -> Response:
+        """The front page: every filed story, from every filer."""
+        return _json({"sessions": await self._repository().list_all()})
+
+    async def _filings(self, identity) -> Response:
+        """What *you* filed — the copy desk showing your own recent work.
+
+        Barely different from :meth:`_edition` today, and that is the point: the
+        difference is the whole reason the owner column exists, and it is the
+        read that will matter once the desk lists only your drafts.
+        """
         sessions = await self._repository().list_recent(identity.email)
         return _json({"owner": identity.email, "sessions": sessions})
 

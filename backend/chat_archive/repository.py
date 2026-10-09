@@ -98,16 +98,29 @@ class D1ConversationRepository(ConversationRepository):
                 "UPDATE conversations SET report_id = ? WHERE id = ?"
             ).bind(report_id, conv_id).run()
 
+    async def list_all(self, limit: int = 200) -> list[dict]:
+        """The public edition: every filed story, newest first, no owner filter."""
+        result = await self._db.prepare(
+            "SELECT c.external_id AS id, c.title, c.created_at, c.source, c.owner_email, "
+            "r.markdown "
+            "FROM conversations c "
+            "LEFT JOIN reports r ON r.conversation_id = c.id "
+            "ORDER BY c.created_at DESC LIMIT ?"
+        ).bind(limit).all()
+        return list(result.results)
+
     async def list_recent(self, owner_email: str, limit: int = 200) -> list[dict]:
         owner = normalize_email(owner_email)
         if not owner:
             # Raised, not `return []`: an empty owner means the caller lost the
             # identity, and a silent empty shelf would look identical to "this
-            # reader has no stories yet". Fail loudly instead.
+            # reader has filed nothing yet". Fail loudly instead. (The public
+            # edition does not go through here — see list_all.)
             raise ValueError("list_recent requires an owner_email.")
 
         result = await self._db.prepare(
-            "SELECT c.external_id AS id, c.title, c.created_at, c.source, r.markdown "
+            "SELECT c.external_id AS id, c.title, c.created_at, c.source, c.owner_email, "
+            "r.markdown "
             "FROM conversations c "
             "LEFT JOIN reports r ON r.conversation_id = c.id "
             "WHERE c.owner_email = ? "

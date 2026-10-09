@@ -167,95 +167,93 @@ body {
   white-space: nowrap;
 }
 
-/* ── the signed-out front page ─────────────────────── */
-.signedout {
-  max-width: 34rem;
-  padding: var(--s6) 0;
+/* ── the copy desk ─────────────────────────────────── */
+.desk {
+  max-width: 44rem;
 }
 
-.signedout .hl {
+.desk-intro {
+  margin-bottom: var(--s6);
+}
+
+.desk-intro .hl {
   margin-top: var(--s2);
 }
 
-.signedout-actions {
-  display: flex;
-  align-items: center;
-  gap: var(--s4);
-  flex-wrap: wrap;
-  margin-top: var(--s5);
+/* The filing form: the one job this page exists to do, so it gets room. */
+.file-form {
+  border-top: 3px double var(--ink);
+  border-bottom: 1px solid var(--rule);
+  padding: var(--s5) 0;
+  margin-bottom: var(--s6);
 }
 
-/* ── the paste-a-link box, in the masthead ─────────── */
-.upload {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: var(--s2);
-}
-
-.upload-lb {
+.file-form label {
+  display: block;
   font-family: var(--mono);
   font-size: 0.625rem;
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--muted);
+  margin-bottom: var(--s2);
 }
 
-.upload input {
+.file-row {
+  display: flex;
+  gap: var(--s3);
+  flex-wrap: wrap;
+}
+
+.file-row input {
+  flex: 1 1 22rem;
+  min-width: 0;
   font-family: var(--mono);
-  font-size: 0.75rem;
+  font-size: 0.8125rem;
   color: var(--ink);
   background: var(--card);
   border: 1px solid var(--card-line);
   border-radius: 4px;
-  padding: 0.5rem 0.65rem;
-  width: 17rem;
+  padding: 0.7rem 0.8rem;
 }
 
-.upload input:focus {
+.file-row input:focus {
   border-color: var(--accent);
   outline: none;
   box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 18%, transparent);
 }
 
-.upload button {
-  font-family: var(--mono);
-  font-size: 0.6875rem;
-  letter-spacing: 0.04em;
-  background: var(--ink);
-  color: var(--paper);
-  border: 1px solid var(--ink);
-  border-radius: 4px;
-  padding: 0.5rem 1rem;
-  cursor: pointer;
+.file-row .btn {
+  flex: 0 0 auto;
 }
 
-.upload button:hover:not(:disabled) {
-  background: var(--accent);
-  border-color: var(--accent);
-}
-
-.upload button:disabled { opacity: 0.55; cursor: not-allowed; }
-
-.upload-msg {
-  position: absolute;
-  right: 0;
-  top: 100%;
-  margin-top: var(--s2);
-  z-index: 5;
+.file-msg {
   font-family: var(--mono);
   font-size: 0.6875rem;
+  line-height: 1.5;
+  margin-top: var(--s3);
   color: var(--muted);
-  background: var(--card);
-  border: 1px solid var(--rule);
-  border-radius: 4px;
-  padding: 0.35rem 0.6rem;
-  max-width: 30rem;
 }
 
-.upload-msg.error {
+.file-msg.error {
   color: #b00020;
-  border-color: color-mix(in oklab, #b00020 35%, transparent);
+}
+
+.desk-sub {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  font-weight: 400;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+  border-bottom: 1px solid var(--rule);
+  padding-bottom: var(--s2);
+  margin-bottom: var(--s4);
+}
+
+.desk-filings ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
 }
 
 /* ── typographic primitives ────────────────────────── */
@@ -612,13 +610,13 @@ body {
   .story-lead:last-child { border-bottom: 0; }
   .flow { flex-direction: column; }
   .fcol { border-left: 0; padding: 0; width: 100%; }
-  .upload input { width: 100%; }
 }
 
 @media (max-width: 640px) {
   .frame { padding: var(--s5) var(--s3) var(--s6); }
   .masthead .row { flex-direction: column; align-items: flex-start; gap: var(--s3); }
-  .upload { width: 100%; flex-wrap: wrap; }
+  .file-row .btn { flex: 1 1 100%; }
+  .mh-actions { flex-wrap: wrap; }
 }
 
 @media (prefers-reduced-motion: reduce) {

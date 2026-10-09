@@ -38,27 +38,34 @@
   link after ingest**.
 
 ### Site / UI
-- One domain, two surfaces:
-  - `https://akshayprabhakant.com/chat-archives` — the newspaper front page, one
-    reader's shelf.
-  - `https://akshayprabhakant.com/chat-archives/login` — the sign-in screen (its own path, so it can be Access-scoped).
-  - `https://akshayprabhakant.com/chat-archives/<share-id>` — one story.
+- One domain, four routes:
+  - `https://akshayprabhakant.com/chat-archives` — the edition. Public.
+  - `https://akshayprabhakant.com/chat-archives/<share-id>` — one story. Public.
+  - `https://akshayprabhakant.com/chat-archives/login` — the sign-in screen.
+  - `https://akshayprabhakant.com/chat-archives/desk` — the **copy desk**: file a
+    share link. The only gated surface.
 - The site root (`/`) is deliberately *not* the archive; it only points at
   `/chat-archives`.
 
 ### Who may see what (decided)
 
-Three rules, and they are not the same rule:
+One rule: **public reads, private writes.**
 
 | Action | Needs an identity? | Why |
 |---|---|---|
+| Read the edition (front page) | **No** — public | It is a newspaper. Everyone reads the same edition, from every filer. |
 | Read one story by its `share-id` | **No** — public | The point of sending someone a story link is that it works. |
-| See a shelf (the front page listing) | **Yes** | A shelf is one reader's; email scoping is what keeps them apart. |
-| Import a share link | **Yes** | This is the only route that can spend money and storage. |
+| File a share link | **Yes** | The only action that spends money and storage. |
+| See your own filings | **Yes** | Provenance, not a boundary — it answers "what did I file?". |
 
-Ownership lives in the data, not in the URL: `conversations.owner_email`, with
-the upsert key being the pair `(owner_email, external_id)`. Two readers may
-archive the same share link and each gets their own copy.
+Ownership is *provenance*, not an access boundary: `conversations.owner_email`
+drives the credit line and the desk's "your recent filings" list. It is retained
+in the upsert key — the pair `(owner_email, external_id)` — so two people can
+file the same share link and both appear in the edition.
+
+The `source` column is what makes the other vendors cheap: `chatgpt | gemini |
+claude | elicit` already exists, and each new one is another parser
+implementation behind the existing ports, not a change to this model.
 
 ### Auth
 
@@ -68,10 +75,13 @@ archive the same share link and each gets their own copy.
   server), `AnonymousIdentity` (tests / safe default).
 - **Access cannot do the whole job on its own** — it matches hostname and path,
   never the HTTP method or the query string, so it cannot express "public GET,
-  private POST", and its own one-time-PIN screen is served from a different domain.
-  protecting. See `docs/access-limits.md`.
-- Access is therefore optional as an *outer* lock; the authority for the table
-  above is the Worker. A self-hosted OTP flow can be added later as one more
+  private POST", and its one-time-PIN screen is served from a different domain
+  (`<team>.cloudflareaccess.com`), so it cannot be restyled or replaced.
+  See `docs/access-limits.md`.
+- The route split is what makes Access *useful* though: `/chat-archives/desk` is
+  a real path, so it — and only it — can be put behind Access.
+- Access is optional as an *outer* lock; the authority for the table above is the
+  Worker. A self-hosted OTP flow can be added later as one more
   `IdentityProvider` implementation.
 - Rule regardless of mechanism: **fail closed.** No identity → 401. There is no
   default reader.
@@ -106,7 +116,7 @@ archive the same share link and each gets their own copy.
 -- One row per archived conversation, ON ONE READER'S SHELF
 CREATE TABLE conversations (
   id          TEXT PRIMARY KEY,        -- our own UUID
-  owner_email TEXT NOT NULL,           -- whose shelf this sits on (lowercased)
+  owner_email TEXT NOT NULL,           -- who filed it (provenance, lowercased)
   external_id TEXT NOT NULL,           -- source provider's conversation id
   title       TEXT,
   created_at  TEXT NOT NULL,
@@ -151,14 +161,15 @@ CREATE INDEX idx_reports_conv ON reports(conversation_id);
 ```
 
 Design notes:
-- `(owner_email, external_id) UNIQUE` = idempotency key, scoped per shelf. A
-  global `external_id UNIQUE` would be wrong: it would let the first reader to
-  import a link block everyone else from archiving it.
+- `(owner_email, external_id) UNIQUE` = idempotency key, scoped per filer. A
+  global `external_id UNIQUE` would be wrong: it would let the first person to
+  file a link block everyone else from filing it.
 - Ownership is a **column, not a URL prefix**. A story's permalink never
   contains an email, so the email can never leak into a shared link.
-- `list_recent` refuses to run with an empty owner (raises, rather than
-  returning `[]`) — a lost identity and a genuinely empty shelf must not look
-  the same.
+- Two listings, named so neither can be mistaken for the other: `list_all` is
+  the public edition (unscoped, by design), `list_recent` is one filer's own.
+  The scoped one refuses an empty owner (raises, rather than returning `[]`) —
+  a lost identity and a genuinely empty list must not look the same.
 - Store raw markdown, not HTML.
 - Images referenced in a summary live in R2; D1 stores text + URL.
 
