@@ -29,8 +29,9 @@ import threading
 import uuid
 from datetime import datetime, timezone
 
-from .models import Citation, Conversation, Message, normalize_email
+from .models import Citation, Conversation, Message, Source, normalize_email
 from .ports import ConversationRepository
+from .repository import _sources_by_message
 
 #: Stories imported before archives became per-email are attributed to this
 #: address. Override with ARCHIVE_LEGACY_OWNER if the local DB was populated
@@ -65,6 +66,18 @@ CREATE TABLE IF NOT EXISTS reports (
   skill           TEXT,
   generated_at    TEXT
 );
+CREATE TABLE IF NOT EXISTS sources (
+  id              TEXT PRIMARY KEY,
+  conversation_id TEXT NOT NULL REFERENCES conversations(id),
+  message_seq     INTEGER NOT NULL,
+  seq             INTEGER NOT NULL,
+  kind            TEXT NOT NULL,
+  title           TEXT,
+  url             TEXT NOT NULL,
+  attribution     TEXT,
+  pub_date        INTEGER,
+  spans           TEXT
+);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_conversations_owner_external
   ON conversations(owner_email, external_id);
 CREATE INDEX IF NOT EXISTS idx_conversations_owner_recent
@@ -72,6 +85,7 @@ CREATE INDEX IF NOT EXISTS idx_conversations_owner_recent
 CREATE INDEX IF NOT EXISTS idx_conversations_external ON conversations(external_id);
 CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id, seq);
 CREATE INDEX IF NOT EXISTS idx_reports_conv ON reports(conversation_id);
+CREATE INDEX IF NOT EXISTS idx_sources_message ON sources(conversation_id, message_seq, seq);
 """
 
 
@@ -149,6 +163,7 @@ class SqliteConversationRepository(ConversationRepository):
                 )
                 self._conn.execute("DELETE FROM messages WHERE conversation_id = ?", (conv_id,))
                 self._conn.execute("DELETE FROM reports WHERE conversation_id = ?", (conv_id,))
+                self._conn.execute("DELETE FROM sources WHERE conversation_id = ?", (conv_id,))
             else:
                 self._conn.execute(
                     "INSERT INTO conversations "
@@ -171,6 +186,28 @@ class SqliteConversationRepository(ConversationRepository):
                 [
                     (str(uuid.uuid4()), conv_id, seq, msg.role, msg.content, now)
                     for seq, msg in enumerate(conversation.messages)
+                ],
+            )
+
+            self._conn.executemany(
+                "INSERT INTO sources "
+                "(id, conversation_id, message_seq, seq, kind, title, url, attribution, pub_date, spans) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                [
+                    (
+                        str(uuid.uuid4()),
+                        conv_id,
+                        message_seq,
+                        source.index,
+                        source.kind,
+                        source.title,
+                        source.url,
+                        source.attribution,
+                        source.pub_date,
+                        json.dumps([list(span) for span in source.spans]),
+                    )
+                    for message_seq, message in enumerate(conversation.messages)
+                    for source in message.sources
                 ],
             )
 
@@ -222,7 +259,12 @@ class SqliteConversationRepository(ConversationRepository):
 
             conv_id, title, stored_owner = row
             messages = self._conn.execute(
-                "SELECT role, content FROM messages WHERE conversation_id = ? ORDER BY seq",
+                "SELECT seq, role, content FROM messages WHERE conversation_id = ? ORDER BY seq",
+                (conv_id,),
+            ).fetchall()
+            source_rows = self._conn.execute(
+                "SELECT message_seq, seq, kind, title, url, attribution, pub_date, spans "
+                "FROM sources WHERE conversation_id = ? ORDER BY message_seq, seq",
                 (conv_id,),
             ).fetchall()
             report_row = self._conn.execute(
@@ -237,10 +279,21 @@ class SqliteConversationRepository(ConversationRepository):
                 for c in json.loads(report_row[1])
             ]
 
+        source_dicts = [
+            {
+                "message_seq": r[0], "seq": r[1], "kind": r[2], "title": r[3],
+                "url": r[4], "attribution": r[5], "pub_date": r[6], "spans": r[7],
+            }
+            for r in source_rows
+        ]
+
         return Conversation(
             share_id=share_id,
             title=title,
-            messages=[Message(role=r, content=c) for r, c in messages],
+            messages=[
+                Message(role=r[1], content=r[2], sources=_sources_by_message(source_dicts, r[0]))
+                for r in messages
+            ],
             report=report_row[0] if report_row else None,
             citations=citations,
             owner_email=stored_owner,

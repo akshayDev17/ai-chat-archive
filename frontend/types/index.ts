@@ -24,9 +24,31 @@ export interface WhoAmI {
   email: string | null;
 }
 
+/**
+ * A web source cited inside one message.
+ *
+ * `spans` are `[start, end]` offsets into that message's `content`, marking
+ * where the citation sits. The source text itself holds only an opaque
+ * private-use token there — the token means nothing without these offsets, and
+ * the offsets mean nothing without the source. Plural because one source is
+ * often cited several times in a single reply.
+ */
+export interface Source {
+  /** 1-based, by order of first appearance in the message. */
+  index: number;
+  /** `cite` for an inline citation pill, `link` for a link the model wrote. */
+  kind: 'cite' | 'link';
+  title: string;
+  url: string;
+  attribution: string;
+  pub_date: number | null;
+  spans: [number, number][];
+}
+
 export interface Message {
   role: string;
   content: string;
+  sources: Source[];
 }
 
 export interface Citation {

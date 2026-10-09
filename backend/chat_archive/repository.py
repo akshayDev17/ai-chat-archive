@@ -5,8 +5,30 @@ from __future__ import annotations
 import json
 import uuid
 
-from .models import Citation, Conversation, Message, normalize_email
+from .models import Citation, Conversation, Message, Source, normalize_email
 from .ports import ConversationRepository
+
+
+def _sources_by_message(rows, message_seq: int) -> list[Source]:
+    """The sources belonging to one message, in order.
+
+    Shared by both SQL repositories so the wire shape of a source cannot differ
+    between D1 and local development — which is exactly the kind of drift that
+    shows up as a bug on deploy only.
+    """
+    return [
+        Source(
+            index=row["seq"],
+            kind=row["kind"],
+            title=row["title"] or "",
+            url=row["url"],
+            attribution=row["attribution"] or "",
+            pub_date=row["pub_date"],
+            spans=tuple(tuple(span) for span in json.loads(row["spans"] or "[]")),
+        )
+        for row in rows
+        if row["message_seq"] == message_seq
+    ]
 
 
 class D1ConversationRepository(ConversationRepository):
@@ -48,6 +70,9 @@ class D1ConversationRepository(ConversationRepository):
             await self._db.prepare(
                 "DELETE FROM reports WHERE conversation_id = ?"
             ).bind(conv_id).run()
+            await self._db.prepare(
+                "DELETE FROM sources WHERE conversation_id = ?"
+            ).bind(conv_id).run()
         else:
             await self._db.prepare(
                 "INSERT INTO conversations "
@@ -73,6 +98,32 @@ class D1ConversationRepository(ConversationRepository):
         ]
         if batch:
             await self._db.batch(batch)
+
+        # Sources are keyed by the message's position, so they are written after
+        # the messages and only for the ones that have any.
+        source_stmt = self._db.prepare(
+            "INSERT INTO sources "
+            "(id, conversation_id, message_seq, seq, kind, title, url, attribution, pub_date, spans) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        )
+        source_batch = [
+            source_stmt.bind(
+                str(uuid.uuid4()),
+                conv_id,
+                message_seq,
+                source.index,
+                source.kind,
+                source.title,
+                source.url,
+                source.attribution,
+                source.pub_date,
+                json.dumps([list(span) for span in source.spans]),
+            )
+            for message_seq, message in enumerate(conversation.messages)
+            for source in message.sources
+        ]
+        if source_batch:
+            await self._db.batch(source_batch)
 
         if conversation.report:
             report_id = str(uuid.uuid4())
@@ -157,11 +208,15 @@ class D1ConversationRepository(ConversationRepository):
             return None
 
         messages = await self._db.prepare(
-            "SELECT role, content FROM messages WHERE conversation_id = ? ORDER BY seq"
+            "SELECT seq, role, content FROM messages WHERE conversation_id = ? ORDER BY seq"
         ).bind(row["id"]).all()
         report = await self._db.prepare(
             "SELECT markdown, citations FROM reports WHERE conversation_id = ?"
         ).bind(row["id"]).first()
+        source_rows = await self._db.prepare(
+            "SELECT message_seq, seq, kind, title, url, attribution, pub_date, spans "
+            "FROM sources WHERE conversation_id = ? ORDER BY message_seq, seq"
+        ).bind(row["id"]).all()
 
         citations: list[Citation] = []
         if report and report.get("citations"):
@@ -173,7 +228,14 @@ class D1ConversationRepository(ConversationRepository):
         return Conversation(
             share_id=share_id,
             title=row["title"],
-            messages=[Message(role=m["role"], content=m["content"]) for m in messages.results],
+            messages=[
+                Message(
+                    role=m["role"],
+                    content=m["content"],
+                    sources=_sources_by_message(source_rows.results, m["seq"]),
+                )
+                for m in messages.results
+            ],
             report=report["markdown"] if report else None,
             citations=citations,
             owner_email=row["owner_email"],

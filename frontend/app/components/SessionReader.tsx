@@ -73,6 +73,22 @@ export default function SessionReader({
   );
   const items = useMemo(() => (session ? toChatItems(session.messages) : []), [session]);
 
+  /**
+   * Distinct web sources the *conversation itself* cites, across all turns.
+   *
+   * Not the same number as `session.citations`, which is what the generated
+   * report wrote into its own bibliography — a reply can cite eighteen pages
+   * while the report's bibliography lists none, and the transcript header was
+   * showing that report number and reading "0 sources" above a wall of links.
+   */
+  const conversationSources = useMemo(() => {
+    const urls = new Set<string>();
+    for (const message of session?.messages ?? []) {
+      for (const source of message.sources ?? []) urls.add(source.url);
+    }
+    return urls.size;
+  }, [session]);
+
   // Keep the view in the URL so it is linkable and survives a refresh:
   //   /chat-archives/<id>       → report
   //   /chat-archives/<id>?chat  → chat
@@ -94,7 +110,13 @@ export default function SessionReader({
       <h1 className="hl">{session.title}</h1>
       <div className="byline">
         {session.source.toUpperCase()}
-        {session.citations.length ? ` · ${session.citations.length} CITATIONS` : ''}
+        {mode === 'report'
+          ? session.citations.length
+            ? ` · ${session.citations.length} CITATIONS`
+            : ''
+          : conversationSources
+            ? ` · ${conversationSources} SOURCES`
+            : ''}
       </div>
 
       <div className="rtoggle" role="tablist" aria-label="View">
@@ -125,7 +147,9 @@ export default function SessionReader({
       ) : (
         <div className="convo">
           <div className="stamp">
-            {session.citations.length} sources · verbatim transcript
+            {conversationSources
+              ? `${conversationSources} sources · verbatim transcript`
+              : 'Verbatim transcript'}
           </div>
 
           {items.map((item, i) => {

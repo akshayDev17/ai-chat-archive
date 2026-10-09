@@ -17,5 +17,10 @@
     "paths": { "@/*": ["./*"] }
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts", ".next-build/types/**/*.ts"],
-  "exclude": ["node_modules"]
+  // Test files are excluded from the app typecheck because they run under
+  // `node --test --experimental-strip-types`, which resolves ESM and therefore
+  // needs the explicit `.ts` extension on imports — something tsc rejects
+  // (TS5097). They are still checked, by being run: `npm run test:lib` fails on
+  // a type error.
+  "exclude": ["node_modules", "**/*.test.ts"]
 }

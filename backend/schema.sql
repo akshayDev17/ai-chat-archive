@@ -51,6 +51,37 @@ CREATE TABLE IF NOT EXISTS reports (
   generated_at    TEXT
 );
 
+-- Web sources cited inside a message, from the payload's
+-- `message.metadata.content_references`.
+--
+-- These are NOT the same thing as `reports.citations`. The report's citations
+-- are whatever the generated markdown happened to write into its own
+-- bibliography; these are the conversation's own sources — the pills ChatGPT
+-- renders inline and the "Sources" panel at the foot of a reply. They were
+-- being discarded, which is why a reply citing eighteen URLs could show none.
+--
+-- Keyed by (conversation_id, message_seq) rather than by a message id because
+-- the sequence is what the reader has: the transcript is delivered as an
+-- ordered list, and a message has no stable id of its own on the wire.
+--
+-- `spans` is a JSON array of [start, end] offsets into that message's text —
+-- plural, because one source is often cited several times in one reply, and
+-- collapsing them would leave later inline markers with nothing to point at.
+CREATE TABLE IF NOT EXISTS sources (
+  id              TEXT PRIMARY KEY,
+  conversation_id TEXT NOT NULL REFERENCES conversations(id),
+  message_seq     INTEGER NOT NULL,      -- order of the message in the conversation
+  seq             INTEGER NOT NULL,      -- order within the message (= source index)
+  kind            TEXT NOT NULL,         -- cite | link
+  title           TEXT,
+  url             TEXT NOT NULL,         -- canonical, tracking params removed
+  attribution     TEXT,
+  pub_date        INTEGER,
+  spans           TEXT                   -- JSON [[start,end], ...]
+);
+
+CREATE INDEX IF NOT EXISTS idx_sources_message ON sources(conversation_id, message_seq, seq);
+
 -- One copy of a share link per filer. Replaces the old UNIQUE(external_id):
 -- uniqueness is scoped to whoever filed it.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_conversations_owner_external

@@ -22,9 +22,48 @@ from dataclasses import dataclass, field, replace
 
 
 @dataclass(frozen=True)
+class Source:
+    """A web source cited *inside* one message.
+
+    ChatGPT stores these in ``message.metadata.content_references``, not in the
+    message text. The text only carries an opaque private-use token where the
+    citation belongs:
+
+        …the agreement was "not imminent."\\ue200cite\\ue202turn0search1\\ue201
+
+    and the reference tells you what that token means — ``matched_text`` for the
+    token itself, ``start_idx``/``end_idx`` for where it sits, and ``items`` for
+    the title and URL. Without joining those two halves the token is noise, so
+    the app used to delete it; with them it becomes a source link.
+
+    One source can be cited repeatedly, so it owns a list of spans rather than a
+    single offset. Collapsing repeats into one span would leave the second
+    inline marker with nothing to point at, and it would silently disappear with
+    the token stripper.
+
+    ``url`` is the canonical URL: ChatGPT's own ``?utm_source=chatgpt.com``
+    tracking parameter is removed, and the duplicate it creates in
+    ``safe_urls`` collapses into the same source.
+    """
+
+    #: 1-based position within the message, by order of first appearance.
+    index: int
+    title: str
+    url: str
+    attribution: str = ""
+    pub_date: int | None = None
+    #: ``cite`` for an inline citation pill, ``link`` for a link the model wrote.
+    kind: str = "cite"
+    #: ``(start, end)`` offsets into the message text, in order, deduplicated.
+    #: Empty when no span could be trusted — the source is still listed.
+    spans: tuple[tuple[int, int], ...] = ()
+
+
+@dataclass(frozen=True)
 class Message:
     role: str
     content: str
+    sources: list[Source] = field(default_factory=list)
 
 
 @dataclass(frozen=True)

@@ -198,9 +198,31 @@ Empirically confirmed against a real share (`.../share/6ac7f3f2-...`):
 - **Page is anonymously reachable** (HTTP 200); the JSON endpoint 403s (bot wall),
   so the Worker fetches the page and decodes the embedded data.
 - **Transcript**: fully present (roles, code blocks, execution output).
-- **Citations**: present, but in **two shapes** — the numbered-marker style
-  (`[n] Title` + URL, which the reader linkifies) and a plain ordered list
-  (`1. **Title.** …` + URL, which GFM autolinks on its own). See below.
+- **Citations**, two separate things that were being conflated:
+  1. *The report's bibliography* — whatever the generated markdown wrote, in
+     either the numbered-marker style (`[n] Title` + URL, which the reader
+     linkifies) or a plain ordered list (`1. **Title.** …` + URL, which GFM
+     autolinks). Stored as `reports.citations`.
+  2. *The conversation's own sources* — ChatGPT's inline citation pills and the
+     "Sources" panel at the foot of a reply, held in
+     `message.metadata.content_references` and keyed to character spans in the
+     message text. Stored as `sources`, one row per message per source, with a
+     JSON array of spans.
+
+  (2) was being **discarded**: the tokens were stripped as noise and a comment
+  claimed the payload gave no token→URL mapping. It does. Replies citing
+  eighteen URLs therefore showed none. Now the tokens are replaced with real
+  links and the sources listed, per message.
+
+  Two traps live in (2), both now covered by tests:
+  * **The offsets are code points, and JavaScript indexes UTF-16.** A reply
+    containing twelve emoji was off by twelve, so spans replaced the wrong
+    characters. The conversion happens in `serializers.py` at the wire.
+  * **`content_references` carries more than sources.** `followup_a` (suggested
+    questions), `sources_footnote` (a zero-width marker), and — in other
+    sessions — `entity`, `entity_metadata`, `map` and `image_group` (place
+    cards, maps, image carousels). None of those are citations; the widgets are
+    dropped for now, which is the artifact-segregation work still to do.
 - **Summary markdown**: **fully present and complete** — the `chat-to-markdown-report`
   skill emits it as a Python raw-string literal in the assistant's code block,
   which survives the share. The `sandbox:/mnt/data/*.md` "file" is just a

@@ -7,7 +7,8 @@
     "build": "next build",
     "build:check": "NEXT_DIST_DIR=.next-build next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test:lib": "node --experimental-strip-types --test lib/*.test.ts"
   },
   "dependencies": {
     "next": "^15.0.0",
