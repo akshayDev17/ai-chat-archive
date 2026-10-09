@@ -6,7 +6,14 @@
 -- Every conversation records who filed it (conversations.owner_email). That is
 -- PROVENANCE, not an access boundary: the edition is public, so list_all()
 -- deliberately does not filter on it. It survives because it answers "what did
--- I file?" and supplies the credit line on the front page.
+-- I file?" for the copy desk.
+--
+-- It is also NEVER published on a listing. list_all() and list_recent() both
+-- omit owner_email from their SELECT, because /api/sessions answers anonymous
+-- visitors and a per-row address there would publish every filer's email in the
+-- JSON. The column is read for its WHERE clause and its uniqueness, not to be
+-- handed to a client. The one endpoint that returns an address is /api/whoami,
+-- to the person it belongs to.
 --
 -- The dedupe/upsert key is the PAIR (owner_email, external_id), not
 -- external_id alone: two people may legitimately file the same ChatGPT share

@@ -55,15 +55,16 @@ class MemoryConversationRepository(ConversationRepository):
 
     @staticmethod
     def _rows(items, limit: int) -> list[dict]:
+        # No owner_email in the row shape — these rows are served to anonymous
+        # visitors on the edition endpoint. See the D1 implementation.
         rows: list[dict] = []
-        for (owner, _), conversation in items:
+        for (_, _unused), conversation in items:
             rows.append(
                 {
                     "id": conversation.share_id,
                     "title": conversation.title,
                     "created_at": "",
                     "source": "chatgpt",
-                    "owner_email": owner,
                     "markdown": conversation.report,
                 }
             )

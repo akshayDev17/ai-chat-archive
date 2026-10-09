@@ -9,33 +9,37 @@ import { whoami } from '@/lib/api';
  * public pages.
  *
  *   signed out → Sign in
- *   signed in  → Copy desk, plus who you are
+ *   signed in  → Copy desk
  *
- * There is deliberately no import box here any more. Filing copy is a
- * different job from reading the paper, and it belongs on its own page: an
- * input wedged into the nameplate was both cramped and permanently visible to
- * people who could not use it.
+ * Two things are deliberately absent.
+ *
+ * There is no import box: filing copy is a different job from reading the
+ * paper, and it belongs on its own page. An input wedged into the nameplate
+ * was both cramped and permanently visible to people who could not use it.
+ *
+ * And there is no address. Printing "akshay@akshayprabhakant.com" in the
+ * nameplate of a *public* newspaper is the one place an email must never
+ * appear — the whole design keeps addresses off the wire and out of URLs, and
+ * stamping one into the masthead undoes that for anyone looking over a
+ * shoulder, in a screenshot, or on a projector. The desk confirms who you are
+ * signed in as, on the one page that requires signing in to see.
  *
  * Sign in is an <a> styled as a button, not a <button>: it navigates, so link
  * semantics (middle-click, open-in-new-tab, screen-reader "link") are the
  * correct ones.
  */
 export default function MastheadActions() {
-  const [email, setEmail] = useState<string | null>(null);
-  const [resolved, setResolved] = useState(false);
+  const [signedIn, setSignedIn] = useState<boolean | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     whoami()
-      .then((value) => {
-        if (!cancelled) setEmail(value);
+      .then((email) => {
+        if (!cancelled) setSignedIn(Boolean(email));
       })
       .catch(() => {
         // The backend being down is not a reason to hide the sign-in link.
-        if (!cancelled) setEmail(null);
-      })
-      .finally(() => {
-        if (!cancelled) setResolved(true);
+        if (!cancelled) setSignedIn(false);
       });
     return () => {
       cancelled = true;
@@ -43,25 +47,12 @@ export default function MastheadActions() {
   }, []);
 
   // Reserve the slot while resolving so the masthead does not reflow.
-  if (!resolved) return <div className="mh-actions" aria-hidden="true" />;
-
-  if (!email) {
-    return (
-      <div className="mh-actions">
-        <Link href="/chat-archives/login" className="signin">
-          Sign in <span aria-hidden="true">→</span>
-        </Link>
-      </div>
-    );
-  }
+  if (signedIn === null) return <div className="mh-actions" aria-hidden="true" />;
 
   return (
     <div className="mh-actions">
-      <span className="reader" title={email}>
-        {email}
-      </span>
-      <Link href="/chat-archives/desk" className="signin">
-        Copy desk <span aria-hidden="true">→</span>
+      <Link href={signedIn ? '/chat-archives/desk' : '/chat-archives/login'} className="signin">
+        {signedIn ? 'Copy desk' : 'Sign in'} <span aria-hidden="true">→</span>
       </Link>
     </div>
   );

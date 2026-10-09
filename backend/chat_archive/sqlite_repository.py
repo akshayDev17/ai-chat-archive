@@ -247,25 +247,21 @@ class SqliteConversationRepository(ConversationRepository):
         )
 
     async def list_all(self, limit: int = 200) -> list[dict]:
-        """The public edition: every filed story, newest first, no owner filter."""
+        """The public edition: every filed story, newest first, no owner filter.
+
+        ``owner_email`` is deliberately not selected — see the D1 implementation
+        for why.
+        """
         with self._lock:
             rows = self._conn.execute(
-                "SELECT c.external_id AS id, c.title, c.created_at, c.source, c.owner_email, "
-                "r.markdown "
+                "SELECT c.external_id AS id, c.title, c.created_at, c.source, r.markdown "
                 "FROM conversations c "
                 "LEFT JOIN reports r ON r.conversation_id = c.id "
                 "ORDER BY c.created_at DESC LIMIT ?",
                 (limit,),
             ).fetchall()
         return [
-            {
-                "id": r[0],
-                "title": r[1],
-                "created_at": r[2],
-                "source": r[3],
-                "owner_email": r[4],
-                "markdown": r[5],
-            }
+            {"id": r[0], "title": r[1], "created_at": r[2], "source": r[3], "markdown": r[4]}
             for r in rows
         ]
 
@@ -276,8 +272,7 @@ class SqliteConversationRepository(ConversationRepository):
 
         with self._lock:
             rows = self._conn.execute(
-                "SELECT c.external_id AS id, c.title, c.created_at, c.source, c.owner_email, "
-                "r.markdown "
+                "SELECT c.external_id AS id, c.title, c.created_at, c.source, r.markdown "
                 "FROM conversations c "
                 "LEFT JOIN reports r ON r.conversation_id = c.id "
                 "WHERE c.owner_email = ? "
@@ -285,13 +280,6 @@ class SqliteConversationRepository(ConversationRepository):
                 (owner, limit),
             ).fetchall()
         return [
-            {
-                "id": r[0],
-                "title": r[1],
-                "created_at": r[2],
-                "source": r[3],
-                "owner_email": r[4],
-                "markdown": r[5],
-            }
+            {"id": r[0], "title": r[1], "created_at": r[2], "source": r[3], "markdown": r[4]}
             for r in rows
         ]

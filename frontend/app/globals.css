@@ -155,18 +155,6 @@ body {
   transform: translateY(1px);
 }
 
-/* The signed-in reader's address, set like a small masthead credit. */
-.mh-actions .reader {
-  font-family: var(--mono);
-  font-size: 0.625rem;
-  letter-spacing: 0.06em;
-  color: var(--muted);
-  max-width: 14rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 /* ── the copy desk ─────────────────────────────────── */
 .desk {
   max-width: 44rem;

@@ -160,7 +160,12 @@ class Handler(BaseHTTPRequestHandler):
                     "ok": True,
                     "runtime": "local-server",
                     "identity_provider": "DevIdentity",
-                    "dev_email": DEV_EMAIL or None,
+                    # A boolean, not the address. This endpoint is unauthenticated
+                    # even locally, and an endpoint that echoes an email is an
+                    # endpoint that leaks one the moment it is exposed by a
+                    # tunnel or a mis-set PORT. Whether a dev identity exists is
+                    # the whole debugging value; the value itself adds nothing.
+                    "dev_identity_configured": bool(DEV_EMAIL),
                 }
             )
 

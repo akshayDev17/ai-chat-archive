@@ -3,9 +3,13 @@ export interface Session {
   title: string;
   created_at: string;
   source: string;
-  /** Who filed it. Provenance, shown as a credit — not an access boundary. */
-  owner_email?: string | null;
-  /** Raw markdown of the summary report (the "thumbnail"). */
+  /**
+   * Raw markdown of the summary report (the "thumbnail").
+   *
+   * Note there is no `owner_email` here. Provenance is stored server-side and
+   * never sent on a listing: `/api/sessions` answers anonymous visitors, so a
+   * per-row address would publish every filer's email in the JSON.
+   */
   markdown?: string | null;
 }
 

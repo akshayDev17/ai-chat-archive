@@ -58,10 +58,14 @@ One rule: **public reads, private writes.**
 | File a share link | **Yes** | The only action that spends money and storage. |
 | See your own filings | **Yes** | Provenance, not a boundary — it answers "what did I file?". |
 
-Ownership is *provenance*, not an access boundary: `conversations.owner_email`
-drives the credit line and the desk's "your recent filings" list. It is retained
-in the upsert key — the pair `(owner_email, external_id)` — so two people can
-file the same share link and both appear in the edition.
+Ownership is *provenance*, not an access boundary, and it **never leaves the
+server on a read**: `conversations.owner_email` keys the upsert, scopes the
+desk's "your recent filings" query, and is returned by exactly one endpoint
+(`/api/whoami`, to its owner). No listing row carries an address — `/api/sessions`
+is served to anonymous visitors, so a per-row address would publish every filer's
+email in the JSON. It is retained in the upsert key — the pair
+`(owner_email, external_id)` — so two people can file the same share link and both
+appear in the edition.
 
 The `source` column is what makes the other vendors cheap: `chatgpt | gemini |
 claude | elicit` already exists, and each new one is another parser

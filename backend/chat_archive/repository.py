@@ -99,10 +99,17 @@ class D1ConversationRepository(ConversationRepository):
             ).bind(report_id, conv_id).run()
 
     async def list_all(self, limit: int = 200) -> list[dict]:
-        """The public edition: every filed story, newest first, no owner filter."""
+        """The public edition: every filed story, newest first, no owner filter.
+
+        ``owner_email`` is deliberately **not selected**. This row shape is
+        served to anonymous visitors, so including the filer's address would
+        publish it to anyone who opened the JSON. Provenance stays in the
+        database — it keys the upsert and scopes :meth:`list_recent` — and the
+        only place it is ever returned to a client is `/api/whoami`, to the
+        person it belongs to.
+        """
         result = await self._db.prepare(
-            "SELECT c.external_id AS id, c.title, c.created_at, c.source, c.owner_email, "
-            "r.markdown "
+            "SELECT c.external_id AS id, c.title, c.created_at, c.source, r.markdown "
             "FROM conversations c "
             "LEFT JOIN reports r ON r.conversation_id = c.id "
             "ORDER BY c.created_at DESC LIMIT ?"
@@ -118,9 +125,11 @@ class D1ConversationRepository(ConversationRepository):
             # edition does not go through here — see list_all.)
             raise ValueError("list_recent requires an owner_email.")
 
+        # Same row shape as list_all, and for the same reason: no owner_email on
+        # the wire. The endpoint that calls this already knows who is asking —
+        # it returns `owner` at the top level.
         result = await self._db.prepare(
-            "SELECT c.external_id AS id, c.title, c.created_at, c.source, c.owner_email, "
-            "r.markdown "
+            "SELECT c.external_id AS id, c.title, c.created_at, c.source, r.markdown "
             "FROM conversations c "
             "LEFT JOIN reports r ON r.conversation_id = c.id "
             "WHERE c.owner_email = ? "

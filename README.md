@@ -10,8 +10,9 @@ a newspaper. See `plan.md` for the full design.
 
 Sessions laid out as a newspaper front page: two leads above the fold, a third
 heading the flow beneath, then three columns that each run to their own ragged
-depth. **Public, and the same edition for everyone** — ownership is a credit
-line, not a filter. The only control in the masthead is Sign in.
+depth. **Public, and the same edition for everyone.** The only control in the
+masthead is Sign in — no import box, and no email address, on a page anyone can
+read.
 
 ![The front page](docs/screenshots/01-front-page.png)
 
@@ -19,7 +20,8 @@ line, not a filter. The only control in the masthead is Sign in.
 
 Where a share link becomes a story. Reached by signing in, and gated: the
 filing endpoint is the only write in the product. It also shows your own recent
-filings, which is what the `owner_email` column is still for.
+filings, which is what the `owner_email` column is still for — and the one place
+your address is shown back to you, on a page that requires signing in.
 
 ![The copy desk](docs/screenshots/08-copy-desk.png)
 
@@ -68,9 +70,13 @@ One rule, stated once: **public reads, private writes.** The only gated actions
 are `POST /api/ingest` and `GET /api/filings`.
 
 Ownership is still recorded (`conversations.owner_email`) but it is *provenance,
-not an access boundary* — it drives the credit line and the desk's "your recent
-filings" list. The upsert key remains `(owner_email, external_id)`, so two people
-can file the same share link and both are in the edition.
+not an access boundary*, and it never leaves the server on a read: it keys the
+upsert, scopes the desk's "your recent filings" query, and is returned by exactly
+one endpoint — `/api/whoami`, to the person it belongs to. No listing carries an
+address, because `/api/sessions` answers anonymous visitors and a per-row address
+there would publish every filer's email in the JSON. The upsert key remains
+`(owner_email, external_id)`, so two people can file the same share link and both
+are in the edition.
 
 Provenance is also what makes the other sources cheap to add: `conversations.source`
 is already `chatgpt | gemini | claude | elicit`, and each becomes another

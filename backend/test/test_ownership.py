@@ -125,9 +125,40 @@ class OwnershipContract:
         self.assertEqual({s["id"] for s in edition}, {"share-a", "share-b"})
 
     def test_the_edition_records_who_filed_each_story(self):
-        """Ownership survives as provenance, even though it gates nothing now."""
+        """Provenance is stored, even though it is never published.
+
+        The row shape must NOT carry the address: `/api/sessions` is served to
+        anonymous visitors, so returning `owner_email` here publishes the
+        filer's email to anyone who opens the JSON. Provenance stays in the
+        database — it keys the upsert and scopes list_recent.
+        """
         asyncio.run(self.repo.upsert(conversation("share-a", "A story", AKSHAY)))
-        self.assertEqual(asyncio.run(self.repo.list_all())[0]["owner_email"], AKSHAY)
+        row = asyncio.run(self.repo.list_all())[0]
+        self.assertNotIn("owner_email", row, "the public edition must not carry filer addresses")
+
+    def test_no_listing_row_ever_carries_an_email(self):
+        """Guard for both listings: no address on the wire, public or private.
+
+        The scoped endpoint already returns `owner` at the top level to the one
+        person it belongs to, so a per-row address is redundant as well as
+        risky.
+        """
+        asyncio.run(self.repo.upsert(conversation("share-a", "A story", AKSHAY)))
+
+        for label, rows in (
+            ("list_all", asyncio.run(self.repo.list_all())),
+            ("list_recent", asyncio.run(self.repo.list_recent(AKSHAY))),
+        ):
+            with self.subTest(listing=label):
+                self.assertTrue(rows, "expected at least one row")
+                for row in rows:
+                    self.assertNotIn("owner_email", row)
+                    for value in row.values():
+                        self.assertNotIn(
+                            AKSHAY,
+                            str(value),
+                            f"{label} leaked the filer's address in a field value",
+                        )
 
     # -- your own filings stay scoped ----------------------------------------
 
