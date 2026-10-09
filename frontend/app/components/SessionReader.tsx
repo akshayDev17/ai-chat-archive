@@ -10,7 +10,7 @@ import { getSession } from '@/lib/api';
 import { linkifyCitations } from '@/lib/citations';
 import { splitMention, toChatItems } from '@/lib/chat';
 import { vendorLabel, vendorMark } from '@/lib/vendors';
-import type { SessionDetail } from '@/types';
+import type { SessionDetail, Source } from '@/types';
 import SourcesPanel from './SourcesPanel';
 
 export type ReaderMode = 'report' | 'chat';
@@ -85,9 +85,12 @@ export default function SessionReader({
   const [session, setSession] = useState<SessionDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<ReaderMode>(initialMode);
-  // Which reply's sources panel is open, by item index. One at a time: two open
-  // panels in a reading column would just overlap.
-  const [openSources, setOpenSources] = useState<number | null>(null);
+  // Which reply's sources drawer is open. One at a time — two drawers would
+  // just stack, and the index is kept so the `···` that opened it can show it
+  // is the active one.
+  const [openSources, setOpenSources] = useState<{ index: number; sources: Source[] } | null>(
+    null,
+  );
 
   useEffect(() => {
     getSession(id)
@@ -199,7 +202,7 @@ export default function SessionReader({
             }
 
             if (item.kind === 'assistant') {
-              const open = openSources === i;
+              const open = openSources?.index === i;
               return (
                 <div className="row row-assistant" key={i}>
                   <span className="mark">
@@ -213,8 +216,8 @@ export default function SessionReader({
                       <CopyButton text={item.content} />
                       {item.sources.length ? (
                         // The `···` was decoration until there was something
-                        // behind it. Now it is the disclosure control for the
-                        // sources, which keeps a long list out of the prose
+                        // behind it. Now it discloses the reply's sources in the
+                        // side drawer, which keeps a long list out of the prose
                         // while leaving it one click away.
                         <button
                           type="button"
@@ -222,7 +225,9 @@ export default function SessionReader({
                           title={`Sources (${item.sources.length})`}
                           aria-label={`Sources, ${item.sources.length}`}
                           aria-expanded={open}
-                          onClick={() => setOpenSources(open ? null : i)}
+                          onClick={() =>
+                            setOpenSources(open ? null : { index: i, sources: item.sources })
+                          }
                         >
                           ···
                         </button>
@@ -230,9 +235,6 @@ export default function SessionReader({
                         <span className="more idle" aria-hidden="true">···</span>
                       )}
                     </div>
-                    {open ? (
-                      <SourcesPanel sources={item.sources} onClose={() => setOpenSources(null)} />
-                    ) : null}
                   </div>
                 </div>
               );
@@ -260,6 +262,13 @@ export default function SessionReader({
           <div className="disclaimer">ChatGPT can make mistakes. Check important info.</div>
         </div>
       )}
+
+      {/* Outside the transcript on purpose: a fixed drawer must not sit inside
+          anything that can clip it, and it belongs to the page rather than to
+          the reply that opened it. */}
+      {openSources ? (
+        <SourcesPanel sources={openSources.sources} onClose={() => setOpenSources(null)} />
+      ) : null}
     </article>
   );
 }

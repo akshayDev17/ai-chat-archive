@@ -19,7 +19,7 @@ import { domainOf, domainTint, vendorForUrl, vendorMark } from '@/lib/vendors';
  * wanted, they belong fetched once at ingest and stored — not requested from
  * every reader's browser, forever.
  */
-export default function SourceIcon({ url, size = 18 }: { url: string; size?: number }) {
+export default function SourceIcon({ url, size = 24 }: { url: string; size?: number }) {
   const vendor = vendorForUrl(url);
   const mark = vendor ? vendorMark(vendor) : null;
 

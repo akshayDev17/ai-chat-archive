@@ -10,8 +10,8 @@ reply citing eighteen URLs displayed none.
 | **The conversation's sources** | `message.metadata.content_references` | ChatGPT's inline source pills, and the panel at the foot of a reply | `sources` |
 
 Both are now parsed and shown, in the two places they belong: the report's
-bibliography renders with the report, and the conversation's sources sit behind
-the `···` on each assistant turn in the transcript.
+bibliography renders with the report, and the conversation's sources open from
+the `···` on each assistant turn into a drawer down the right-hand edge.
 
 ## Why the conversation's sources needed recovering
 
@@ -108,7 +108,16 @@ is a reserved slot with no file.
 ## Design reference
 
 `docs/reference/chatgpt-sources-ui.png` is the ChatGPT Activity panel this
-feature is modelled on: a badge, the domain, then the title, per row. The
-ordering is the part worth copying — the domain tells you who is speaking faster
-than a headline does, and the headline is what you actually decide on. The
-typography is ours.
+feature is modelled on: a right-hand drawer, and per row a badge, the domain,
+then the title. The ordering is the part worth copying — the domain tells you who
+is speaking faster than a headline does, and the headline is what you actually
+decide on.
+
+The drawer replaced a popover hung under the `···`, which was wrong for the same
+reason the ChatGPT panel is a sidebar: a reply can cite a dozen pages, and inline
+that list pushes the transcript off screen. At the side it stays open *beside*
+the sentence that cited it, which is why you opened it. The scrim catches the
+click that closes and deliberately does not dim — muting the article behind would
+defeat the point.
+
+The typography is ours.
