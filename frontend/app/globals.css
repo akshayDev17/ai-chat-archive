@@ -334,6 +334,10 @@ body {
   border-radius: 4px;
   padding: 0.7rem 1.25rem;
   cursor: pointer;
+  /* `.btn` is applied to <a> as well as <button> — "Sign in" navigates, so it
+     is a link. Links carry a default underline, which shows through and makes
+     the button look broken; the button styling is the affordance instead. */
+  text-decoration: none;
   transition: background 0.2s var(--ease), color 0.2s var(--ease);
 }
 

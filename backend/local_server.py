@@ -97,18 +97,36 @@ class Handler(BaseHTTPRequestHandler):
             return normalize_email(header)
         return DEV_EMAIL
 
+    def _cors_headers(self):
+        """CORS headers that survive ``credentials: 'include'``.
+
+        The frontend sends ``credentials: 'include'`` (so the real auth cookie
+        would be carried in production). A wildcard ``Access-Control-Allow-Origin:
+        *`` is **illegal together with credentials** — the browser rejects the
+        response outright, and every API call fails with an opaque "Failed to
+        fetch" that ``curl`` never reproduces, because curl does not enforce
+        CORS. So the request's own ``Origin`` is echoed back, which is exactly
+        what an allowlist-echoing server does, plus ``Vary: Origin`` so caches
+        do not mix the two.
+        """
+        origin = self.headers.get("Origin")
+        if origin:
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Access-Control-Allow-Credentials", "true")
+            self.send_header("Vary", "Origin")
+
     def _json(self, obj, status=200):
         body = json.dumps(obj).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
-        self.send_header("Access-Control-Allow-Origin", "*")
+        self._cors_headers()
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
 
     def _cors_preflight(self):
         self.send_response(204)
-        self.send_header("Access-Control-Allow-Origin", "*")
+        self._cors_headers()
         self.send_header("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
         self.send_header("Access-Control-Allow-Headers", ALLOWED_HEADERS)
         self.end_headers()

@@ -6,14 +6,21 @@ a newspaper. See `plan.md` for the full design.
 
 ## Screenshots
 
-### The front page
+### The front page — signed in
 
 Sessions laid out as a newspaper front page: two leads above the fold, a third
 heading the flow beneath, then three columns that each run to their own ragged
-depth. The paste-a-link box sits in the masthead. Every story is a link through
-to its report.
+depth. The import box sits in the masthead, beside the reader's address.
 
 ![The front page](docs/screenshots/01-front-page.png)
+
+### The front page — signed out
+
+Stories are public; shelves are not. A visitor with no identity gets the
+masthead's Sign in chip and an explanation, rather than a misleading "no stories
+yet". Stories they were sent links to stay readable.
+
+![The front page, signed out](docs/screenshots/08-front-page-signed-out.png)
 
 ### Reading a session — the report
 
