@@ -65,3 +65,20 @@ export function ingestSession(shareUrl: string): Promise<IngestResult> {
     body: JSON.stringify({ share_url: shareUrl }),
   });
 }
+
+/**
+ * The URL the sign-in screen navigates to in order to authenticate.
+ *
+ * **This must be a top-level navigation, not a `fetch()`.** Cloudflare Access
+ * serves its one-time-PIN screen from `<team>.cloudflareaccess.com` — a
+ * different domain — and only ever redirects a *navigation* there. A protected
+ * `fetch()` instead receives a 302 that the browser follows as a GET, dropping
+ * the request body; that is the silent import failure described in
+ * `UploadInline.tsx`.
+ *
+ * In production the API is same-origin, so the `CF_Authorization` cookie —
+ * which is scoped to the domain, not the path — is attached on the way back.
+ */
+export function signInUrl(next = '/chat-archives'): string {
+  return `${API_BASE}/api/session/start?next=${encodeURIComponent(next)}`;
+}

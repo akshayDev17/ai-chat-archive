@@ -36,6 +36,7 @@ from .chatgpt.parser import ChatGptParser
 from .repository import D1ConversationRepository
 from .serializers import conversation_detail
 from .service import InvalidShareUrl, ShareService
+from .urls import first_param, path_of, query_of, safe_next
 
 
 def _json(body: object, status: int = 200) -> Response:
@@ -47,13 +48,8 @@ def _json(body: object, status: int = 200) -> Response:
 
 
 def _path_of(request) -> str:
-    """The request path, without query string or trailing slash.
-
-    ``request.url`` is a JS string over the FFI boundary; ``str()`` normalizes
-    it whether Python hands back a ``str`` or a JS proxy.
-    """
-    url = str(request.url)
-    return url.split("?", 1)[0].rstrip("/") or "/"
+    """The request path. ``request.url`` is a JS string over the FFI boundary."""
+    return path_of(str(request.url))
 
 
 class Default(WorkerEntrypoint):
@@ -99,7 +95,40 @@ class Default(WorkerEntrypoint):
         if path.endswith("/api/ingest") and method == "POST":
             return await self._ingest(request, identity)
 
+        if path.endswith("/api/session/start"):
+            return self._session_start(request)
+
         return Response("Not found", status=404)
+
+    def _session_start(self, request) -> Response:
+        """Where our own sign-in screen hands a browser over to Cloudflare Access.
+
+        This route exists to solve one specific problem. Access authenticates by
+        intercepting a **top-level navigation** and serving its one-time-PIN
+        screen from ``<team>.cloudflareaccess.com`` — a different domain, so no
+        path on ours can ever reach it. That means our Rail sign-in screen
+        cannot *call* Access; it can only send the browser somewhere Access will
+        catch it.
+
+        So: the browser visits this path, Access intercepts, the visitor enters
+        the code on Cloudflare's screen, and Access redirects back here with the
+        ``CF_Authorization`` cookie now attached. Only then does our Worker run —
+        by which point there is an identity, so we simply forward to ``next``.
+
+        Reaching this method therefore *means* the visitor authenticated. It is
+        unreachable anonymously when Access fronts the API, and 401s
+        anonymously when it does not.
+
+        Note: this must be a real navigation, not ``fetch()``. A protected
+        ``fetch`` gets a 302 that the browser follows as a GET, dropping any
+        request body — the silent failure described in ``UploadInline.tsx``.
+        """
+        url = str(request.url)
+        return Response(
+            "",
+            status=302,
+            headers={"location": safe_next(first_param(query_of(url), "next"))},
+        )
 
     async def _health(self) -> Response:
         """Report whether Python Workers actually expose ``self.ctx``.

@@ -40,6 +40,7 @@ from chat_archive.models import normalize_email
 from chat_archive.serializers import conversation_detail
 from chat_archive.service import ShareService
 from chat_archive.sqlite_repository import SqliteConversationRepository
+from chat_archive.urls import first_param, query_of, safe_next
 
 DEV_EMAIL = normalize_email(
     os.environ.get("DEV_EMAIL", "akshay@akshayprabhakant.com")
@@ -124,6 +125,13 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _redirect(self, location: str, status: int = 302):
+        self.send_response(status)
+        self.send_header("Location", location)
+        self._cors_headers()
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
     def _cors_preflight(self):
         self.send_response(204)
         self._cors_headers()
@@ -161,6 +169,18 @@ class Handler(BaseHTTPRequestHandler):
             if not email:
                 return self._json({"error": "sign-in required"}, 401)
             return self._json({"email": email})
+
+        if path == "/api/session/start":
+            # The sign-in handoff. In production this path sits behind Access,
+            # so reaching it *means* Cloudflare already authenticated the
+            # visitor and we only have to send them onward. Locally there is no
+            # Access to do that, so this mirrors the post-authentication half
+            # (redirect to `next`) and 401s when there is no identity.
+            email = self._identity()
+            if not email:
+                return self._json({"error": "sign-in required"}, 401)
+            query = query_of(self.path)
+            return self._redirect(safe_next(first_param(query, "next")))
 
         if path == "/api/sessions":
             email = self._identity()

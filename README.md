@@ -56,16 +56,41 @@ chosen, a local server stands in for it.
 
 ## Who can see what
 
-| | Signed out | Signed in as the owner |
+| Route | Signed out | Signed in as the owner |
 |---|---|---|
 | `/chat-archives/<share-id>` — one story | **readable** | readable |
 | `/chat-archives` — the front page | "sign in" screen | your shelf |
+| `/chat-archives/login` — the sign-in screen | screen | redirects to the shelf |
 | Importing a share link | hidden | available |
 
 Ownership is a column (`conversations.owner_email`), not a URL prefix, so a
 story's permalink never contains an email address. The upsert key is
 `(owner_email, external_id)` — two readers may archive the same share link and
 each gets their own copy.
+
+### Why the sign-in screen has its own path
+
+Cloudflare Access scopes an application by **path**, and a query string is not
+part of a path:
+
+> "Query strings (such as `?foo=bar`) are not supported in Access application
+> paths." — [Access application paths](https://developers.cloudflare.com/cloudflare-one/access-controls/policies/app-paths/)
+
+So `/chat-archives?login` was one Access-scoped URL with `/chat-archives`, and no
+rule could ever target it. As `/chat-archives/login` it is independently
+scopeable, and the wildcard rules separate all three routes:
+
+| Access application | Covers | Does not cover |
+|---|---|---|
+| `…/chat-archives` | the shelf | login, stories |
+| `…/chat-archives/*` | login, stories | the shelf |
+| `…/api/sessions` | the shelf API | `…/api/sessions/<id>` |
+| `…/api/sessions/*` | one public story | the shelf API |
+
+The last two matter because Access has **no HTTP-method selector** at all (its
+documented selectors are emails, IPs, countries, device posture, IdP groups,
+service tokens — no verbs), so "public GET, private POST" is written in
+`entry.py`, not in a policy. `docs/access-limits.md` has the citations.
 
 ## Structure
 
@@ -126,7 +151,8 @@ frontend/
 │   ├── layout.tsx              # fonts + metadata
 │   ├── page.tsx                # NOT the archive — points at /chat-archives
 │   ├── globals.css             # the whole design system
-│   ├── chat-archives/page.tsx        # front page, or ?login for sign-in
+│   ├── chat-archives/page.tsx        # the front page
+│   ├── chat-archives/login/page.tsx   # the sign-in screen (own path)
 │   ├── chat-archives/[id]/page.tsx   # the reader (?chat for the transcript)
 │   └── components/
 │       ├── Masthead.tsx        # the nameplate

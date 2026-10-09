@@ -1,17 +1,25 @@
 # Can Cloudflare Access protect the login page, and the OTP that follows it?
 
-**Short answer: it can protect a path, but it cannot protect *your* login page —
-because Access's own one-time-PIN screen is the login page. You have to pick one
-of the two, and the reason is a hard ordering rule, not a configuration detail.**
+**Short answer, split in two — because the two halves have different answers.**
+
+- **The login *page*: yes.** It is on our domain, so once it has its own *path*
+  it can be given its own Access policy. It used to live at
+  `/chat-archives?login`, and a query string is not a path, so no Access rule
+  could ever match it. It is now `/chat-archives/login` — a real path, scoped
+  independently. See §2 and §10.
+- **The OTP *screen*: no.** Not for any reason to do with paths. It is served
+  from `<team>.cloudflareaccess.com`, a **different domain**, and no path on
+  `akshayprabhakant.com` can scope — or replace — a page on someone else's
+  domain. See §10.
 
 Every claim below is quoted from `developers.cloudflare.com`. Where the docs are
-silent, this file says **NOT DOCUMENTED** instead of guessing. Two things I
-believed before writing this turned out to be wrong; they are corrected in
-§7 and §8.
+silent, this file says **NOT DOCUMENTED** instead of guessing. Three things I
+believed before writing this turned out to be wrong; they are corrected in §7,
+§8 and §10.
 
 ---
 
-## 1. The ordering rule that makes it circular
+## 1. The ordering rule
 
 Access is an identity-aware proxy that runs **before** your code:
 
@@ -27,13 +35,9 @@ Access is an identity-aware proxy that runs **before** your code:
 > will block the request."
 > — <https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/>
 
-So if `/chat-archives?login` is behind Access, an unauthenticated visitor never
-reaches our `AuthFlow` component. They get Cloudflare's screen instead. Our
-six-digit code inputs would be dead code — and worse, there would then be *two*
-OTP flows stacked, Cloudflare's and ours.
-
-This is the circularity: **Access's login page is the thing you would be
-protecting.** Protecting it means replacing it.
+So any path behind Access is never served to an unauthenticated visitor. That is
+what forces the login route to be *bypassed* rather than protected — it is not a
+reason the route cannot exist on its own path.
 
 ## 2. Path matching works; query strings do not
 
@@ -50,9 +54,17 @@ But:
 > paths.**"
 > — same page (Cloudflare's missing space after "such as" is reproduced verbatim)
 
-This is decisive for the route layout we chose. `/chat-archives` and
-`/chat-archives?login` are the **same Access-scoped URL**. There is no Access
-rule that protects one and not the other.
+**This is the whole reason the sign-in screen moved to its own path.**
+`/chat-archives` and `/chat-archives?login` were a single Access-scoped URL;
+`/chat-archives/login` is a distinct one and can carry its own policy.
+
+The wildcard rules then split the three routes apart exactly as we want, because
+a wildcard "does not cover the parent path":
+
+| Access application path | Covers | Does not cover |
+|---|---|---|
+| `akshayprabhakant.com/chat-archives` | the shelf | `/chat-archives/login`, `/chat-archives/<id>` |
+| `akshayprabhakant.com/chat-archives/*` | `/chat-archives/login`, `/chat-archives/<id>` | `/chat-archives` |
 
 *Precision note:* the docs say query strings are unsupported *in the Path
 field*, i.e. you cannot author them as a match rule. They do not explicitly say
@@ -268,6 +280,64 @@ plus `akshayprabhakant.com`. A cross-subdomain split would need a second login.
 
 ---
 
+## 10. Correction: the login page *can* be scoped. The OTP screen cannot.
+
+I previously wrote that a login page and Access's OTP were an either/or. That was
+too strong, and the fix was a route change, not a compromise.
+
+**The page.** `?login` was unreachable by any Access rule (§2). As
+`/chat-archives/login` it is an ordinary path with an ordinary policy, and §2's
+wildcard rules let the shelf, the sign-in screen and the story permalinks be
+scoped three different ways.
+
+**The screen.** Cloudflare's OTP UI is not on our domain:
+
+> "**Global session token**: Generated when a user logs in to Access. This token
+> is stored as a cookie at your **team domain** (for example,
+> `https://<your-team-name>.cloudflareaccess.com`) and prevents a user from
+> needing to log in to each application."
+> — <https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/>
+
+`CF_Session` is likewise a CSRF token "used on the `cloudflareaccess.com` team
+domain". No path under `akshayprabhakant.com` can scope, replace or intercept a
+page served from `cloudflareaccess.com`. **That** is the real boundary — not the
+query string, and nothing to do with our route layout.
+
+**But the two together turn out to compose.** Access authenticates a
+**top-level navigation**, so our screen does not have to *call* Access — it only
+has to send the browser somewhere Access will catch it:
+
+```
+  /chat-archives/login          our Rail screen        (public)
+        │  "Send one-time code" is a navigation, not a fetch
+        ▼
+  /api/session/start?next=…     protected path         (Access intercepts here)
+        │  Access redirects to <team>.cloudflareaccess.com
+        ▼
+  Cloudflare's OTP screen       their domain           (the one thing we can't style)
+        │  code accepted; CF_Authorization cookie set on our domain
+        ▼
+  /api/session/start?next=…     now authenticated → 302
+        ▼
+  /chat-archives                your shelf
+```
+
+`GET /api/session/start` exists purely to be that catching point, and because
+Access only lets authenticated requests reach the Worker, arriving at it *is*
+proof of authentication — it just redirects to `next`. Implemented in
+`entry.py::_session_start`, with the local-server equivalent so the flow can be
+exercised without Cloudflare.
+
+Two consequences worth stating plainly:
+
+- The step we do **not** get is typing the code on our own screen. That is
+  Cloudflare's page, styled at most with a logo and colours (§5).
+- `next` is an open-redirect risk, so it is sanitized to a same-site absolute
+  path in exactly one place (`chat_archive/urls.py::safe_next`, shared by both
+  entrypoints).
+
+---
+
 ## What this means for us
 
 The three rules we settled on —
@@ -278,27 +348,26 @@ The three rules we settled on —
 | list a shelf | yes |
 | import a share link | yes |
 
-— **cannot be delegated to Access**, because the middle row and the third row are
-the same path prefix and differ only by method. So they are enforced in
-`entry.py`, and Access is optional.
+— **cannot be delegated to Access**, because the listing and the import are the
+same method on a path prefix that also serves public reads, and Access has no
+method selector (§3). So they are enforced in `entry.py`.
 
-That leaves one genuinely open decision, and it is a UX decision rather than a
-technical one:
+Access's job, if we use it, is narrower: **it is the thing that produces the
+email**, and the thing that makes `/api/session/start` unreachable to strangers.
 
-**Option A — Access owns the login.**
-Delete `AuthFlow.tsx`. `/api/sessions` and `/api/ingest` go behind Access with
-`/api/sessions/*` bypassed (or on a separate path). Cloudflare emails the OTP;
-`ctx.access` supplies the email for per-email scoping. No email provider, no
-auth code, no screenshots 04–07. Cost: the login page is Cloudflare's, branded
-with a logo and colours at best; and we must first verify that Python actually
-exposes `ctx.access`, or the whole thing 401s.
+The remaining choice is only about where the code is typed:
 
-**Option B — we own the login.**
-`AuthFlow.tsx` becomes real. We need an email sender (Resend's free tier is the
-usual pick) because the Worker must mail the code. Access cannot authenticate
-those routes, so it is dropped from them. Cost: a third-party dependency and a
-small amount of auth code; benefit: the Rail login screens are actually used, and
-no undocumented Python Access API is on the critical path.
+**Option A — Cloudflare sends the PIN (via the handoff above).**
+Our Rail screens stay as the entry point at `/chat-archives/login`; the
+navigation hands off to Access, which emails the code. No email provider, no
+auth code of ours. We must first verify Python exposes `ctx.access` (§8) or
+everything 401s. `AuthFlow`'s OTP/verifying/confirmed stages become redundant —
+Cloudflare owns them.
+
+**Option B — we send the PIN.**
+`AuthFlow` becomes real end to end and no undocumented Python Access API is on
+the critical path. Needs an email sender (Resend's free tier is the usual pick),
+because the Worker must mail the code.
 
 Either way, **per-email scoping stays our code**: Access can gate a path, but it
 can never filter a `SELECT` by owner. That is `conversations.owner_email`.

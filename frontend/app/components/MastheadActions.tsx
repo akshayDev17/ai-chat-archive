@@ -46,7 +46,7 @@ export default function MastheadActions() {
   if (!email) {
     return (
       <div className="mh-actions">
-        <Link href="/chat-archives?login" className="signin">
+        <Link href="/chat-archives/login" className="signin">
           Sign in <span aria-hidden="true">→</span>
         </Link>
       </div>

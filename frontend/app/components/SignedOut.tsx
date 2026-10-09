@@ -19,7 +19,7 @@ export default function SignedOut() {
         without signing in.
       </p>
       <div className="signedout-actions">
-        <Link href="/chat-archives?login" className="btn">
+        <Link href="/chat-archives/login" className="btn">
           Sign in
         </Link>
         <span className="fine">A one-time code is emailed — no password is ever stored.</span>

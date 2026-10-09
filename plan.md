@@ -41,7 +41,7 @@
 - One domain, two surfaces:
   - `https://akshayprabhakant.com/chat-archives` — the newspaper front page, one
     reader's shelf.
-  - `https://akshayprabhakant.com/chat-archives?login` — the sign-in screen.
+  - `https://akshayprabhakant.com/chat-archives/login` — the sign-in screen (its own path, so it can be Access-scoped).
   - `https://akshayprabhakant.com/chat-archives/<share-id>` — one story.
 - The site root (`/`) is deliberately *not* the archive; it only points at
   `/chat-archives`.
@@ -68,7 +68,7 @@ archive the same share link and each gets their own copy.
   server), `AnonymousIdentity` (tests / safe default).
 - **Access cannot do the whole job on its own** — it matches hostname and path,
   never the HTTP method or the query string, so it cannot express "public GET,
-  private POST", and its own one-time-PIN screen is the login page it would be
+  private POST", and its own one-time-PIN screen is served from a different domain.
   protecting. See `docs/access-limits.md`.
 - Access is therefore optional as an *outer* lock; the authority for the table
   above is the Worker. A self-hosted OTP flow can be added later as one more
