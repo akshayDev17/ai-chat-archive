@@ -37,7 +37,13 @@ from workers import Response, WorkerEntrypoint
 from .auth import CloudflareAccessIdentity
 from .chatgpt.decoder import ChatGptFlightDecoder
 from .chatgpt.parser import ChatGptParser
-from .chatgpt.socket_fetcher import SocketShareFetcher
+from .chatgpt.socket_fetcher import (
+    DEFAULT_HOST,
+    DEFAULT_PORT,
+    DEFAULT_USER_AGENT,
+    SocketShareFetcher,
+    probe_socket,
+)
 from .repository import D1ConversationRepository
 from .serializers import conversation_detail
 from .service import InvalidShareUrl, ShareService
@@ -81,6 +87,9 @@ class Default(WorkerEntrypoint):
 
         if path.endswith("/api/health"):
             return await self._health()
+
+        if path.endswith("/api/debug/socket"):
+            return await self._socket_probe()
 
         # -- public -----------------------------------------------------------
         # Reading is entirely public: the edition is a newspaper, so every story
@@ -169,6 +178,23 @@ class Default(WorkerEntrypoint):
                 else False,
             }
         )
+
+    async def _socket_probe(self) -> Response:
+        """Diagnostic: what does a raw socket to ChatGPT actually return?
+
+        Public on purpose (like :meth:`_health`): it reveals nothing but the
+        transport behaviour, and it lets the deployed Worker answer the one
+        question that matters when ingest fails — did the connection die at
+        connect, write, or read, and did any bytes come back. Hardcoded host and
+        path so it cannot be turned into a request-forgery gadget.
+        """
+        report = await probe_socket(
+            DEFAULT_HOST,
+            "/share/6ac877f9-c690-83ec-8394-61b0727ba5eb",
+            DEFAULT_USER_AGENT,
+            DEFAULT_PORT,
+        )
+        return _json(report)
 
     async def _edition(self) -> Response:
         """The front page: every filed story, from every filer."""

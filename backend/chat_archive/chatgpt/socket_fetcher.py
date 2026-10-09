@@ -256,20 +256,19 @@ class SocketShareFetcher(ShareFetcher):
         raise FetchError(f"Share page redirects exceeded {self._max_redirects}")
 
     async def _request_with_retry(self, host: str, path: str) -> HttpResponse:
-        """One request, retried once if the stream is cut short mid-body.
+        """One request, retried once on any transport failure.
 
-        ``_request`` tolerates the peer closing a ``Connection: close`` response
-        as a stream cancellation instead of EOF, but that close can still arrive
-        before the last bytes, leaving the body truncated. A truncated share
-        page parses into a conversation that looks valid and is quietly missing
-        its final turns, so a truncation is retried once rather than accepted.
-        Two truncations in a row are still surfaced loudly.
+        A ``Connection: close`` response can be cut short mid-body when the peer
+        closes — or the runtime cancels — the stream before the last bytes. A
+        truncated share page parses into a conversation that looks valid and is
+        quietly missing its final turns, so any fetch/parse failure here is
+        retried once rather than accepted. Two failures in a row surface loudly.
         """
         last = None
         for _ in range(2):
             try:
                 return await self._request(host, path)
-            except IncompleteResponse as exc:
+            except FetchError as exc:
                 last = exc
         raise last
 
@@ -298,14 +297,16 @@ class SocketShareFetcher(ShareFetcher):
 
         reader = connection.readable.getReader()
         raw = bytearray()
+        read_error = None
         while True:
             try:
                 chunk = await reader.read()
-            except Exception:
+            except Exception as exc:
                 # The runtime cancels the socket's readable stream when the
                 # peer closes a `Connection: close` response, rather than
-                # signalling EOF. Treat that as end-of-input: parse_response()
-                # below rejects a truncated body instead of returning it.
+                # signalling EOF. Record it and treat it as end-of-input;
+                # parse_response() below rejects a truncated body.
+                read_error = exc
                 break
             if chunk.done:
                 break
@@ -313,4 +314,77 @@ class SocketShareFetcher(ShareFetcher):
             if len(raw) > self._max_bytes:
                 raise FetchError(f"share page exceeded {self._max_bytes} bytes")
 
-        return parse_response(bytes(raw))
+        try:
+            return parse_response(bytes(raw))
+        except IncompleteResponse:
+            if read_error is not None:
+                head = bytes(raw[:200]).decode("latin-1", "replace")
+                raise FetchError(
+                    f"socket read failed after {len(raw)} bytes "
+                    f"(first={head!r}; {type(read_error).__name__}: {read_error})"
+                )
+            raise
+
+
+async def probe_socket(
+    host: str, path: str, user_agent: str, port: int = DEFAULT_PORT
+) -> dict:
+    """Open one raw socket, send a GET, and report what actually happened.
+
+    Diagnostic helper for the live Worker: a blocked or reset connection looks
+    identical to a slow one from outside, so this reports each stage (connect,
+    write, read) plus whatever bytes made it back. The imports live inside the
+    body so the module still imports in plain Python.
+    """
+    from js import Object, TextEncoder
+    from pyodide.ffi import to_js as _to_js
+    from workers.utils import import_from_javascript
+
+    def to_js(obj):
+        return _to_js(obj, dict_converter=Object.fromEntries)
+
+    report = {"host": host, "port": port, "path": path}
+
+    sockets = import_from_javascript("cloudflare:sockets")
+    try:
+        connection = sockets.connect(
+            to_js({"hostname": host, "port": port}),
+            to_js({"secureTransport": "on"}),
+        )
+        report["connected"] = True
+    except Exception as exc:
+        report["connected"] = False
+        report["connect_error"] = f"{type(exc).__name__}: {exc}"
+        return report
+
+    try:
+        writer = connection.writable.getWriter()
+        await writer.write(TextEncoder.new().encode(build_request(host, path, user_agent)))
+        report["wrote"] = True
+    except Exception as exc:
+        report["wrote"] = False
+        report["write_error"] = f"{type(exc).__name__}: {exc}"
+        return report
+
+    reader = connection.readable.getReader()
+    raw = bytearray()
+    read_error = None
+    while True:
+        try:
+            chunk = await reader.read()
+        except Exception as exc:
+            read_error = f"{type(exc).__name__}: {exc}"
+            break
+        if chunk.done:
+            break
+        raw += bytes(chunk.value.to_py())
+        if len(raw) > 1024 * 1024:
+            break
+
+    report["bytes_read"] = len(raw)
+    report["read_clean_eof"] = read_error is None
+    if read_error is not None:
+        report["read_error"] = read_error
+    report["first_bytes"] = bytes(raw[:300]).decode("latin-1", "replace")
+
+    return report
