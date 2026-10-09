@@ -8,6 +8,38 @@ Read §1 first: it decides the shape of everything after it.
 
 ---
 
+## 0. What is already live
+
+Verified against the real domain, not inferred:
+
+| | |
+|---|---|
+| `akshayprabhakant.com/api/health` | **200** — `{"runtime": "python-workers", "context_available": true, "access_available": false}` |
+| `akshayprabhakant.com/api/sessions` | 200, `{"sessions": []}` — D1 is reachable and empty |
+| `akshayprabhakant.com/api/whoami` | `{"email": null}` — no Access configured, so everyone is anonymous |
+| `akshayprabhakant.com/chat-archives` | **404, served by GitHub Pages** |
+| `akshayprabhakant.com/` | 200 — **an existing portfolio site, also on GitHub Pages** |
+
+So the API Worker is deployed and the route works. Two things follow.
+
+**`context_available: true` settles §8 of `docs/access-limits.md`.** `ctx.access`
+is documented for JavaScript only; this is production evidence that Python
+Workers expose it. Access-as-identity is viable.
+
+**The apex is occupied.** `akshayprabhakant.com/*` is a live portfolio on GitHub
+Pages, and `/chat-archives` 404s there because GitHub Pages has never heard of
+it. So the frontend Worker must be routed to a **path**, not to `/*`:
+
+```
+akshayprabhakant.com/api/*             → the Python Worker      (live)
+akshayprabhakant.com/chat-archives/*   → the frontend Worker    (to do)
+everything else                        → GitHub Pages           (untouched)
+```
+
+Routes are matched by pattern and "the most specific route pattern wins", and
+requests matching no route fall through to the zone's origin. Attaching the
+frontend to `/*` would replace the portfolio.
+
 ## 1. How many Workers, and on how many domains
 
 **A Worker runs one runtime.** The API is Python (`compatibility_flags:
