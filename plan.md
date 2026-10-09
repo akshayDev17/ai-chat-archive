@@ -198,15 +198,24 @@ Empirically confirmed against a real share (`.../share/6ac7f3f2-...`):
 - **Page is anonymously reachable** (HTTP 200); the JSON endpoint 403s (bot wall),
   so the Worker fetches the page and decodes the embedded data.
 - **Transcript**: fully present (roles, code blocks, execution output).
-- **Citations**: fully present — inline `[n]` markers plus a bibliography with
-  titles and URLs.
+- **Citations**: present, but in **two shapes** — the numbered-marker style
+  (`[n] Title` + URL, which the reader linkifies) and a plain ordered list
+  (`1. **Title.** …` + URL, which GFM autolinks on its own). See below.
 - **Summary markdown**: **fully present and complete** — the `chat-to-markdown-report`
-  skill emits it as a Python string in the assistant's code block
-  (`report = r"""# ..."""`), which survives the share. The `sandbox:/mnt/data/*.md`
-  "file" is just a code-interpreter artifact; the content lives in the code.
+  skill emits it as a Python raw-string literal in the assistant's code block,
+  which survives the share. The `sandbox:/mnt/data/*.md` "file" is just a
+  code-interpreter artifact; the content lives in the code.
+- **The variable name is NOT stable.** Observed as `report` in three of four
+  sessions and `content` in the fourth. An earlier parser matched
+  `report\s*=\s*r"""…"""` and therefore dropped the report for `content`
+  **silently** — the conversation imported fine and simply had no report. The
+  parser now matches any identifier and picks the longest candidate that starts
+  with a markdown heading (`chatgpt/parser.py`), pinned by
+  `test/test_parser.py`. The desk also warns when a filing returns
+  `report_length: 0`, so an absence can never again present as a success.
 
-⇒ **No fallback field needed.** The parser extracts the triple-quoted `report`
-string for `reports.markdown`, the messages for `messages`, and the bibliography
+⇒ **No fallback field needed.** The parser extracts the triple-quoted markdown
+literal for `reports.markdown`, the messages for `messages`, and the bibliography
 for citations.
 
 Caveat: this holds because the skill writes the markdown as *visible code text*.

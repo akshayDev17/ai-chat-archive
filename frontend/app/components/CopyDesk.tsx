@@ -102,7 +102,7 @@ export default function CopyDesk() {
 function FileSession() {
   const [url, setUrl] = useState('');
   const [busy, setBusy] = useState(false);
-  const [note, setNote] = useState<{ text: string; error: boolean } | null>(null);
+  const [note, setNote] = useState<{ text: string; tone: 'ok' | 'warn' | 'error' } | null>(null);
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -110,11 +110,18 @@ function FileSession() {
     setNote(null);
     try {
       const result = await ingestSession(url);
-      setNote({
-        text: `“${result.title}” is in the edition — ${result.messages} messages, ${result.citations} citations.`,
-        error: false,
-      });
       setUrl('');
+      setNote({
+        // A filed session with no report is not a failure — the transcript is
+        // there and the story is in the edition — but it is not what was asked
+        // for either, and staying quiet about it is how a missing report went
+        // unnoticed until someone opened the story and asked why it was empty.
+        tone: result.report_length > 0 ? 'ok' : 'warn',
+        text:
+          result.report_length > 0
+            ? `“${result.title}” is in the edition — ${result.messages} messages, ${result.citations} citations.`
+            : `“${result.title}” is in the edition, but no summary report was found in that share — it will read as a transcript only.`,
+      });
       // Tells the front page (another tab included) to re-read the edition.
       window.dispatchEvent(new Event('archive:updated'));
     } catch (error) {
@@ -122,11 +129,11 @@ function FileSession() {
         // The session expired between opening the desk and filing. Access
         // answers a fetch() with a redirect that the browser follows as a GET,
         // dropping the POST body, so the import would otherwise fail silently.
-        setNote({ text: 'Your session expired — sign in again to file.', error: true });
+        setNote({ text: 'Your session expired — sign in again to file.', tone: 'error' });
       } else {
         setNote({
           text: error instanceof Error ? error.message : 'Import failed',
-          error: true,
+          tone: 'error',
         });
       }
     } finally {
@@ -155,7 +162,10 @@ function FileSession() {
           {busy ? 'Filing…' : 'File it'}
         </button>
       </div>
-      <p className={note?.error ? 'file-msg error' : 'file-msg'} role="status">
+      <p
+        className={note && note.tone !== 'ok' ? `file-msg ${note.tone}` : 'file-msg'}
+        role="status"
+      >
         {note ? (
           note.text
         ) : (

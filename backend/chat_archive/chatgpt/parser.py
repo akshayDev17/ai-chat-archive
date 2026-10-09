@@ -7,9 +7,21 @@ import re
 from ..models import Citation, Conversation, Message
 from ..ports import ConversationParser
 
-# The chat-to-markdown-report skill emits the summary as a Python string:
-#   report = r"""# ...""""
-_REPORT_RE = re.compile(r"report\s*=\s*r\"\"\"([\s\S]*?)\"\"\"")
+# The chat-to-markdown-report skill asks the model to emit the summary report as
+# a Python raw-string literal:
+#
+#   report = r"""# ..."""
+#
+# But the VARIABLE NAME IS NOT PART OF THE CONTRACT. Observed in the wild as
+# both `report` and `content`, and a fourth name is entirely possible — the
+# model is writing plausible Python, not filling in a template. Matching on the
+# name dropped the report silently for `content = r"""..."""`: the conversation
+# still imported, so nothing failed, and it simply arrived with no report and no
+# citations. That is the worst kind of bug — a missing field that looks like an
+# empty one.
+#
+# So the name is ignored, and the choice is made on the content instead.
+_RAW_ASSIGN_RE = re.compile(r"[A-Za-z_]\w*\s*=\s*r\"\"\"([\s\S]*?)\"\"\"")
 
 # Bibliography entries look like:  [1] Title. \n https://...
 _BIB_RE = re.compile(r"\[(\d+)\]\s+([^\n]+?)\s*\n\s*(https?://\S+)")
@@ -69,11 +81,26 @@ class ChatGptParser(ConversationParser):
 
     # -- report -----------------------------------------------------------
     def _extract_report(self, raw: dict) -> str | None:
+        """Find the markdown report among the payload's raw-string literals.
+
+        Every ``NAME = r\"\"\"…\"\"\"`` block is a candidate, whatever it is
+        called. Preference goes to candidates that *look* like the report — they
+        start with a markdown heading — and the longest wins, because the whole
+        point of the skill is to produce one long document and any incidental
+        snippet in the same conversation is far shorter.
+
+        The flight payload repeats strings across chunks, so the same report can
+        appear several times; picking the longest makes the duplicates harmless.
+        """
+        candidates: list[str] = []
         for text in _walk_strings(raw):
-            match = _REPORT_RE.search(text)
-            if match:
-                return match.group(1)
-        return None
+            candidates.extend(_RAW_ASSIGN_RE.findall(text))
+
+        if not candidates:
+            return None
+
+        headings = [c for c in candidates if c.lstrip().startswith("#")]
+        return max(headings or candidates, key=len).strip()
 
     # -- citations --------------------------------------------------------
     @staticmethod

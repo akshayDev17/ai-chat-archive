@@ -257,6 +257,12 @@ body {
   color: #b00020;
 }
 
+/* Not a failure and not a success: the filing worked, but not as asked. Amber
+   so it reads as "look at this" rather than "something broke". */
+.file-msg.warn {
+  color: #8a5a00;
+}
+
 /* ── typographic primitives ────────────────────────── */
 .kicker {
   font-family: var(--mono);
