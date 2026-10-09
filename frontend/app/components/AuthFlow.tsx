@@ -116,7 +116,7 @@ export default function AuthFlow() {
       <div className="check" aria-hidden="true">✓</div>
       <h1 className="hl">Welcome back to the archive</h1>
       <p className="standfirst">You are authenticated. Opening your sessions…</p>
-      <button type="button" className="btn" onClick={() => router.push('/')}>
+      <button type="button" className="btn" onClick={() => router.push('/chat-archives')}>
         Enter the archive
       </button>
     </section>

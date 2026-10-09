@@ -2,12 +2,47 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "ai-chat-archive-backend",
   "main": "chat_archive/entry.py",
-  "compatibility_date": "2026-01-01",
+
+  // Python Workers require this flag:
+  // https://developers.cloudflare.com/workers/languages/python/
+  "compatibility_flags": ["python_workers"],
+  "compatibility_date": "2026-10-08",
+
+  // The Worker answers on the API paths only. It does NOT rely on Access for
+  // its access rules: it enforces them itself, because Access has no HTTP-method
+  // selector and cannot express "public GET, private POST". See
+  // docs/access-limits.md. workers_dev is off so the Worker is reachable only
+  // through the custom domain; attaching a route flips it to false by default,
+  // but it is set explicitly so the intent is not left to an inference.
+  "workers_dev": false,
+  "routes": [
+    {
+      "pattern": "akshayprabhakant.com/api/*",
+      "zone_name": "akshayprabhakant.com"
+    }
+  ],
+
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "ai-chat-archive",
       "database_id": "REPLACE_WITH_YOUR_D1_DATABASE_ID"
     }
-  ]
+  ],
+
+  // Lets `wrangler dev` simulate an authenticated Access identity, so
+  // CloudflareAccessIdentity can be exercised locally without a login flow.
+  // The entrypoint reads `ctx.access.getIdentity().email`; this block is what
+  // feeds it in dev.
+  // https://developers.cloudflare.com/workers/configuration/cloudflare-access/
+  //
+  // This only matters if you pick Option A in docs/access-limits.md (Access
+  // owns the login). `python3 backend/local_server.py` uses DevIdentity
+  // instead and needs no wrangler at all.
+  "access": {
+    "dev": {
+      "aud": "ai-chat-archive",
+      "identity": { "email": "you@example.com" }
+    }
+  }
 }

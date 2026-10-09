@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import uuid
 
-from .models import Citation, Conversation, Message
+from .models import Citation, Conversation, Message, normalize_email
 from .ports import ConversationRepository
 
 
@@ -14,16 +14,28 @@ class D1ConversationRepository(ConversationRepository):
 
     ``db`` is the D1 binding (``env.DB`` in the Worker). It is injected so the
     repository can be unit-tested against a fake.
+
+    Every statement that enumerates stories carries an ``owner_email`` filter.
+    Making that filter mandatory in the SQL, rather than optional, is what keeps
+    a second reader's archive from leaking onto the front page.
     """
 
     def __init__(self, db):
         self._db = db
 
     async def upsert(self, conversation: Conversation) -> None:
+        owner = normalize_email(conversation.owner_email)
+        if not owner:
+            raise ValueError(
+                "Refusing to store a conversation with no owner_email: "
+                "an unowned row is invisible to list_recent and would be "
+                "unreachable dead data."
+            )
+
         now = self._now()
         existing = await self._db.prepare(
-            "SELECT id FROM conversations WHERE external_id = ?"
-        ).bind(conversation.share_id).first()
+            "SELECT id FROM conversations WHERE owner_email = ? AND external_id = ?"
+        ).bind(owner, conversation.share_id).first()
 
         conv_id = existing["id"] if existing else str(uuid.uuid4())
         if existing:
@@ -39,9 +51,17 @@ class D1ConversationRepository(ConversationRepository):
         else:
             await self._db.prepare(
                 "INSERT INTO conversations "
-                "(id, external_id, title, created_at, updated_at, source) "
-                "VALUES (?, ?, ?, ?, ?, ?)"
-            ).bind(conv_id, conversation.share_id, conversation.title, now, now, "chatgpt").run()
+                "(id, owner_email, external_id, title, created_at, updated_at, source) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)"
+            ).bind(
+                conv_id,
+                owner,
+                conversation.share_id,
+                conversation.title,
+                now,
+                now,
+                "chatgpt",
+            ).run()
 
         message_stmt = self._db.prepare(
             "INSERT INTO messages (id, conversation_id, seq, role, content, created_at) "
@@ -78,19 +98,39 @@ class D1ConversationRepository(ConversationRepository):
                 "UPDATE conversations SET report_id = ? WHERE id = ?"
             ).bind(report_id, conv_id).run()
 
-    async def list_recent(self, limit: int = 200) -> list[dict]:
+    async def list_recent(self, owner_email: str, limit: int = 200) -> list[dict]:
+        owner = normalize_email(owner_email)
+        if not owner:
+            # Raised, not `return []`: an empty owner means the caller lost the
+            # identity, and a silent empty shelf would look identical to "this
+            # reader has no stories yet". Fail loudly instead.
+            raise ValueError("list_recent requires an owner_email.")
+
         result = await self._db.prepare(
             "SELECT c.external_id AS id, c.title, c.created_at, c.source, r.markdown "
             "FROM conversations c "
             "LEFT JOIN reports r ON r.conversation_id = c.id "
+            "WHERE c.owner_email = ? "
             "ORDER BY c.created_at DESC LIMIT ?"
-        ).bind(limit).all()
+        ).bind(owner, limit).all()
         return list(result.results)
 
-    async def get(self, share_id: str) -> Conversation | None:
-        row = await self._db.prepare(
-            "SELECT id, title FROM conversations WHERE external_id = ?"
-        ).bind(share_id).first()
+    async def get(self, share_id: str, owner_email: str | None = None) -> Conversation | None:
+        owner = normalize_email(owner_email)
+
+        if owner:
+            row = await self._db.prepare(
+                "SELECT id, title, owner_email FROM conversations "
+                "WHERE external_id = ? AND owner_email = ?"
+            ).bind(share_id, owner).first()
+        else:
+            # Public permalink: newest copy wins, so a story that two readers
+            # archived still resolves to something stable rather than 404ing.
+            row = await self._db.prepare(
+                "SELECT id, title, owner_email FROM conversations "
+                "WHERE external_id = ? ORDER BY created_at DESC LIMIT 1"
+            ).bind(share_id).first()
+
         if not row:
             return None
 
@@ -114,6 +154,7 @@ class D1ConversationRepository(ConversationRepository):
             messages=[Message(role=m["role"], content=m["content"]) for m in messages.results],
             report=report["markdown"] if report else None,
             citations=citations,
+            owner_email=row["owner_email"],
         )
 
     @staticmethod

@@ -8,7 +8,13 @@ export interface Session {
 }
 
 export interface SessionListResponse {
+  /** The reader whose shelf this is. Always present: the list is per-email. */
+  owner?: string;
   sessions: Session[];
+}
+
+export interface WhoAmI {
+  email: string;
 }
 
 export interface Message {

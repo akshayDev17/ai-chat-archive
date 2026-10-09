@@ -38,14 +38,43 @@
   link after ingest**.
 
 ### Site / UI
-- `akshayprabhakant.com` — the **entire browse + upload** surface is behind login.
-- Logged-in view has two tabs: **"My GPT sessions"** (reads from D1) and
-  **"Upload a GPT session"** (paste a share link).
+- One domain, two surfaces:
+  - `https://akshayprabhakant.com/chat-archives` — the newspaper front page, one
+    reader's shelf.
+  - `https://akshayprabhakant.com/chat-archives?login` — the sign-in screen.
+  - `https://akshayprabhakant.com/chat-archives/<share-id>` — one story.
+- The site root (`/`) is deliberately *not* the archive; it only points at
+  `/chat-archives`.
+
+### Who may see what (decided)
+
+Three rules, and they are not the same rule:
+
+| Action | Needs an identity? | Why |
+|---|---|---|
+| Read one story by its `share-id` | **No** — public | The point of sending someone a story link is that it works. |
+| See a shelf (the front page listing) | **Yes** | A shelf is one reader's; email scoping is what keeps them apart. |
+| Import a share link | **Yes** | This is the only route that can spend money and storage. |
+
+Ownership lives in the data, not in the URL: `conversations.owner_email`, with
+the upsert key being the pair `(owner_email, external_id)`. Two readers may
+archive the same share link and each gets their own copy.
 
 ### Auth
-- **Cloudflare Access** with **One-time PIN** (email OTP).
-- An **Access policy allowlists only my email** — blocked emails never even
-  receive a code.
+
+- **Identity is a port**, not a vendor call: `IdentityProvider.identify(request)`
+  returns an email or `None`. The router never learns how the answer was made.
+- Implementations: `CloudflareAccessIdentity` (production), `DevIdentity` (local
+  server), `AnonymousIdentity` (tests / safe default).
+- **Access cannot do the whole job on its own** — it matches hostname and path,
+  never the HTTP method or the query string, so it cannot express "public GET,
+  private POST", and its own one-time-PIN screen is the login page it would be
+  protecting. See `docs/access-limits.md`.
+- Access is therefore optional as an *outer* lock; the authority for the table
+  above is the Worker. A self-hosted OTP flow can be added later as one more
+  `IdentityProvider` implementation.
+- Rule regardless of mechanism: **fail closed.** No identity → 401. There is no
+  default reader.
 
 ### Abuse hardening (layered)
 - Identity: Cloudflare Access (above).
@@ -74,10 +103,11 @@
 ## 4. Data model
 
 ```sql
--- One row per AI conversation
+-- One row per archived conversation, ON ONE READER'S SHELF
 CREATE TABLE conversations (
   id          TEXT PRIMARY KEY,        -- our own UUID
-  external_id TEXT UNIQUE NOT NULL,    -- source provider's conversation id (dedupe/upsert key)
+  owner_email TEXT NOT NULL,           -- whose shelf this sits on (lowercased)
+  external_id TEXT NOT NULL,           -- source provider's conversation id
   title       TEXT,
   created_at  TEXT NOT NULL,
   updated_at  TEXT NOT NULL,
@@ -101,16 +131,34 @@ CREATE TABLE reports (
   conversation_id TEXT NOT NULL REFERENCES conversations(id),
   title           TEXT,
   markdown        TEXT NOT NULL,       -- raw markdown summary (render at read time)
+  citations       TEXT,                -- JSON array of {n,title,url}
   skill           TEXT,                -- which summary skill/version produced it
   generated_at    TEXT
 );
+
+-- The upsert key is the PAIR, not external_id alone: the same share link may
+-- legitimately sit on two readers' shelves at once.
+CREATE UNIQUE INDEX idx_conversations_owner_external ON conversations(owner_email, external_id);
+
+-- Every front-page query: WHERE owner_email = ? ORDER BY created_at DESC.
+CREATE INDEX idx_conversations_owner_recent ON conversations(owner_email, created_at DESC);
+
+-- Public permalink lookup, which must NOT filter by owner.
+CREATE INDEX idx_conversations_external ON conversations(external_id);
 
 CREATE INDEX idx_messages_conv ON messages(conversation_id, seq);
 CREATE INDEX idx_reports_conv ON reports(conversation_id);
 ```
 
 Design notes:
-- `external_id UNIQUE` = idempotency key (upsert).
+- `(owner_email, external_id) UNIQUE` = idempotency key, scoped per shelf. A
+  global `external_id UNIQUE` would be wrong: it would let the first reader to
+  import a link block everyone else from archiving it.
+- Ownership is a **column, not a URL prefix**. A story's permalink never
+  contains an email, so the email can never leak into a shared link.
+- `list_recent` refuses to run with an empty owner (raises, rather than
+  returning `[]`) — a lost identity and a genuinely empty shelf must not look
+  the same.
 - Store raw markdown, not HTML.
 - Images referenced in a summary live in R2; D1 stores text + URL.
 

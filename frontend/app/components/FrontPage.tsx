@@ -1,8 +1,9 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { listSessions } from '@/lib/api';
+import { isSignInRequired, listSessions } from '@/lib/api';
 import type { Session } from '@/types';
+import SignedOut from './SignedOut';
 import StoryLink from './StoryLink';
 
 const LEAD_SLOTS = 2; // two leads above the fold; the third heads the flow
@@ -11,12 +12,20 @@ export default function FrontPage() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [signedOut, setSignedOut] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
       setSessions(await listSessions());
+      setSignedOut(false);
       setError(null);
     } catch (e) {
+      if (isSignInRequired(e)) {
+        // Not an error: a visitor with no identity is an expected state.
+        setSignedOut(true);
+        setError(null);
+        return;
+      }
       setError(e instanceof Error ? e.message : 'Failed to load the edition');
     } finally {
       setLoading(false);
@@ -46,6 +55,9 @@ export default function FrontPage() {
   }, [sessions]);
 
   if (loading) return <p className="fine">Printing the edition…</p>;
+  // Signed out beats the error/empty branches: "no stories yet" would be a lie
+  // to a visitor who simply cannot see the shelf.
+  if (signedOut) return <SignedOut />;
   if (error) return <div className="status error">{error}</div>;
   if (sessions.length === 0) {
     return (

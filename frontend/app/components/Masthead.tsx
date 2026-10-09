@@ -1,4 +1,4 @@
-import UploadInline from './UploadInline';
+import MastheadActions from './MastheadActions';
 
 function edition(): string {
   const now = new Date();
@@ -11,12 +11,17 @@ function edition(): string {
   return `Pune · ${date}`;
 }
 
+/**
+ * The paper's nameplate. `actions` decides what sits in the top-right corner:
+ * the auth-aware slot on the front page, nothing on the sign-in screen — there
+ * is no point offering "Sign in" to someone already on the sign-in page.
+ */
 export default function Masthead({
   section,
-  showUpload = false,
+  actions = false,
 }: {
   section?: string;
-  showUpload?: boolean;
+  actions?: boolean;
 }) {
   return (
     <header className="masthead">
@@ -25,7 +30,7 @@ export default function Masthead({
           <span className="name">The AI Digest</span>
           <span className="edition">{section ?? edition()}</span>
         </div>
-        {showUpload ? <UploadInline /> : null}
+        {actions ? <MastheadActions /> : null}
       </div>
       <div className="tagline">An AI conversation newspaper · the sessions, as stories</div>
     </header>

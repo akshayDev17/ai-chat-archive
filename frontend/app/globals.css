@@ -117,6 +117,74 @@ body {
   color: var(--muted);
 }
 
+/* ── the masthead's top-right slot ─────────────────── */
+.mh-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  /* A stable floor keeps the nameplate from jumping between the signed-out
+     and signed-in states on first paint. */
+  min-height: 2rem;
+}
+
+/* Sign in is a link that reads as a button — it navigates, so it keeps link
+   semantics and only borrows button looks. */
+.signin {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35em;
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  text-decoration: none;
+  color: var(--ink);
+  background: var(--card);
+  border: 1px solid var(--card-line);
+  border-radius: 4px;
+  padding: 0.4rem 0.7rem;
+  transition: border-color 0.12s ease, color 0.12s ease, transform 0.12s ease;
+}
+
+.signin:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.signin:active {
+  transform: translateY(1px);
+}
+
+/* The signed-in reader's address, set like a small masthead credit. */
+.mh-actions .reader {
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  max-width: 14rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── the signed-out front page ─────────────────────── */
+.signedout {
+  max-width: 34rem;
+  padding: var(--s6) 0;
+}
+
+.signedout .hl {
+  margin-top: var(--s2);
+}
+
+.signedout-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--s4);
+  flex-wrap: wrap;
+  margin-top: var(--s5);
+}
+
 /* ── the paste-a-link box, in the masthead ─────────── */
 .upload {
   position: relative;

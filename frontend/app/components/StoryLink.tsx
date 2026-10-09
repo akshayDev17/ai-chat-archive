@@ -18,7 +18,7 @@ export default function StoryLink({ session, variant }: Props) {
   return (
     <Link
       className={`story story-${variant}`}
-      href={`/sessions/${encodeURIComponent(session.id)}`}
+      href={`/chat-archives/${encodeURIComponent(session.id)}`}
     >
       {variant !== 'flow' ? <div className="kicker">Lead</div> : null}
 

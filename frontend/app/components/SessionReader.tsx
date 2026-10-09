@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { usePathname, useRouter } from 'next/navigation';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
@@ -10,7 +11,7 @@ import { linkifyCitations } from '@/lib/citations';
 import { splitMention, toChatItems } from '@/lib/chat';
 import type { SessionDetail } from '@/types';
 
-type Mode = 'report' | 'chat';
+export type ReaderMode = 'report' | 'chat';
 
 function Sparkle({ className }: { className?: string }) {
   return (
@@ -47,10 +48,18 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
-export default function SessionReader({ id }: { id: string }) {
+export default function SessionReader({
+  id,
+  initialMode,
+}: {
+  id: string;
+  initialMode: ReaderMode;
+}) {
+  const router = useRouter();
+  const pathname = usePathname();
   const [session, setSession] = useState<SessionDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [mode, setMode] = useState<Mode>('report');
+  const [mode, setMode] = useState<ReaderMode>(initialMode);
 
   useEffect(() => {
     getSession(id)
@@ -64,12 +73,20 @@ export default function SessionReader({ id }: { id: string }) {
   );
   const items = useMemo(() => (session ? toChatItems(session.messages) : []), [session]);
 
+  // Keep the view in the URL so it is linkable and survives a refresh:
+  //   /chat-archives/<id>       → report
+  //   /chat-archives/<id>?chat  → chat
+  function selectMode(next: ReaderMode) {
+    setMode(next);
+    router.replace(next === 'chat' ? `${pathname}?chat` : pathname, { scroll: false });
+  }
+
   if (error) return <div className="status error">{error}</div>;
   if (!session) return <p className="fine">Opening the story…</p>;
 
   return (
     <article className="reader">
-      <Link href="/" className="back">
+      <Link href="/chat-archives" className="back">
         ← All sessions
       </Link>
 
@@ -85,7 +102,7 @@ export default function SessionReader({ id }: { id: string }) {
           role="tab"
           aria-selected={mode === 'report'}
           className={mode === 'report' ? 'on' : ''}
-          onClick={() => setMode('report')}
+          onClick={() => selectMode('report')}
         >
           Report
         </button>
@@ -93,7 +110,7 @@ export default function SessionReader({ id }: { id: string }) {
           role="tab"
           aria-selected={mode === 'chat'}
           className={mode === 'chat' ? 'on' : ''}
-          onClick={() => setMode('chat')}
+          onClick={() => selectMode('chat')}
         >
           Chat
         </button>

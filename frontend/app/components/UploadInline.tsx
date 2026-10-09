@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { ingestSession } from '@/lib/api';
+import { ingestSession, isSignInRequired } from '@/lib/api';
 
 /**
  * The paste-a-share-link box, living in the masthead rather than a tab.
@@ -26,10 +26,21 @@ export default function UploadInline() {
       setUrl('');
       window.dispatchEvent(new Event('archive:updated'));
     } catch (error) {
-      setNote({
-        text: error instanceof Error ? error.message : 'Import failed',
-        error: true,
-      });
+      if (isSignInRequired(error)) {
+        // The session expired between page load and submit. Because Cloudflare
+        // Access answers a fetch() with a redirect to its login page — which
+        // fetch follows as a GET, dropping the POST body — the import would
+        // otherwise fail silently. Saying so plainly is the fix.
+        setNote({
+          text: 'Your session expired — sign in again to import.',
+          error: true,
+        });
+      } else {
+        setNote({
+          text: error instanceof Error ? error.message : 'Import failed',
+          error: true,
+        });
+      }
     } finally {
       setBusy(false);
     }

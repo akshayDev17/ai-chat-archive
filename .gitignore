@@ -8,10 +8,14 @@ venv/
 node_modules/
 .next/
 out/
+*.tsbuildinfo
 
-# env
+# secrets — Cloudflare docs: "The .dev.vars and .env files should not be
+# committed to git. Add .dev.vars* and .env* to your project's .gitignore."
 .env
-.env*.local
+.env*
+.dev.vars
+.dev.vars*
 
 # misc
 .DS_Store
