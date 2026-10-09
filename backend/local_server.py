@@ -67,6 +67,17 @@ DEV_COOKIE = "archive_dev_email"
 
 ALLOWED_HEADERS = "content-type, x-archive-email"
 
+#: Every method this server implements, for the CORS preflight to advertise.
+#
+# The browser sends ``OPTIONS`` before any request whose method is not *simple*
+# (GET, HEAD, POST) and refuses the real request if the response does not list
+# it. ``DELETE`` was missing here, so sign-out failed in the browser with an
+# opaque "Failed to fetch" while ``curl`` — which never preflights — kept
+# passing. Same trap as the ``Access-Control-Allow-Origin: *`` bug: an HTTP
+# client that does not run the browser's CORS rules cannot prove a browser path
+# works. When a method is added to the Handler, add it here too.
+ALLOWED_METHODS = "GET,POST,DELETE,OPTIONS"
+
 
 class LocalResponse:
     """Minimal stand-in for the JS Response object HttpShareFetcher expects."""
@@ -176,7 +187,7 @@ class Handler(BaseHTTPRequestHandler):
     def _cors_preflight(self):
         self.send_response(204)
         self._cors_headers()
-        self.send_header("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
+        self.send_header("Access-Control-Allow-Methods", ALLOWED_METHODS)
         self.send_header("Access-Control-Allow-Headers", ALLOWED_HEADERS)
         self.end_headers()
 
@@ -246,10 +257,10 @@ class Handler(BaseHTTPRequestHandler):
             )
 
         if path == "/api/whoami":
-            email = self._identity()
-            if not email:
-                return self._json({"error": "sign-in required"}, 401)
-            return self._json({"email": email})
+            # "Nobody" is a 200, not a 401 — see the note in entry.py. Being
+            # anonymous is the normal state for the public edition, so a 401
+            # here would put a console error on every page view.
+            return self._json({"email": self._identity() or None})
 
         if path == "/api/session/start":
             # The sign-in handoff. In production this path sits behind Access,

@@ -20,7 +20,8 @@ export interface SessionListResponse {
 }
 
 export interface WhoAmI {
-  email: string;
+  /** `null` when nobody is signed in — an answer, not an error. */
+  email: string | null;
 }
 
 export interface Message {

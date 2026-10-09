@@ -38,14 +38,16 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return data;
 }
 
-/** The signed-in reader's email, or `null` when nobody is signed in. */
+/**
+ * The signed-in reader's email, or `null` when nobody is signed in.
+ *
+ * The endpoint answers 200 with `{email: null}` rather than 401: "who am I?"
+ * with the answer "nobody" is not an error, and a 401 here would make every
+ * browser log a console error on every page view for the whole public audience
+ * of a public archive.
+ */
 export async function whoami(): Promise<string | null> {
-  try {
-    return (await request<WhoAmI>('/api/whoami')).email ?? null;
-  } catch (error) {
-    if (isSignInRequired(error)) return null;
-    throw error;
-  }
+  return (await request<WhoAmI>('/api/whoami')).email ?? null;
 }
 
 /**

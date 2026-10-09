@@ -87,10 +87,14 @@ class Default(WorkerEntrypoint):
         # Reading is entirely public: the edition is a newspaper, so every story
         # and the front page itself are readable without an identity.
         if path.endswith("/api/whoami"):
+            # "Who am I?" answered with "nobody" is a 200, not a 401. Being
+            # anonymous is the expected state for most visitors to a public
+            # archive, and a 401 here makes every browser log a console error on
+            # every page view for the entire public audience. 401 is reserved
+            # for the routes that actually withhold something (`/api/filings`,
+            # `/api/ingest`).
             identity = await self._identity_provider().identify(request)
-            if identity is None:
-                return _json({"error": "sign-in required"}, status=401)
-            return _json({"email": identity.email})
+            return _json({"email": identity.email if identity else None})
 
         if path.endswith("/api/sessions") and method == "GET":
             return await self._edition()
