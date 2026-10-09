@@ -24,6 +24,10 @@ next-env.d.ts
 # committed to git. Add .dev.vars* and .env* to your project's .gitignore."
 .env
 .env*
+# ...except the example, which exists to be committed. `.env*` would otherwise
+# swallow it, so the one file whose whole job is documenting the others would
+# never reach the repo.
+!.env.local.example
 .dev.vars
 .dev.vars*
 

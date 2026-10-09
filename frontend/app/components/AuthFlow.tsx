@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { DEV_AUTH, devSignIn } from '@/lib/api';
 import { AFTER_SIGN_IN, safeNext } from '@/lib/nav';
 
 type Stage = 'email' | 'otp' | 'verifying' | 'confirmed';
@@ -12,6 +13,14 @@ type Stage = 'email' | 'otp' | 'verifying' | 'confirmed';
  * `next` comes from the URL so a visitor bounced off the copy desk returns
  * there. It is sanitized before being used as a navigation target — see
  * `lib/nav.ts`.
+ *
+ * **No identity provider is wired up yet.** The one-time PIN is undecided —
+ * either Cloudflare mails it (our screen hands the browser to Access via
+ * `/api/session/start`) or the Worker mails it via an email service. Until that
+ * is chosen, the OTP stages below cannot be real, so when `DEV_AUTH` is on the
+ * flow calls the local dev sign-in instead, which sets a cookie. That is what
+ * makes the whole journey walkable locally; in production the button becomes a
+ * navigation to Access, and the OTP stages disappear.
  */
 export default function AuthFlow({ next }: { next?: string | null }) {
   const router = useRouter();
@@ -19,14 +28,30 @@ export default function AuthFlow({ next }: { next?: string | null }) {
   const [stage, setStage] = useState<Stage>('email');
   const [email, setEmail] = useState('');
   const [digits, setDigits] = useState<string[]>(Array(6).fill(''));
+  const [error, setError] = useState<string | null>(null);
   const refs = useRef<Array<HTMLInputElement | null>>([]);
 
-  // Auto-advance from "verifying" to "confirmed".
+  // Auto-advance from "verifying" to "confirmed" once the session is set.
   useEffect(() => {
     if (stage !== 'verifying') return;
-    const t = setTimeout(() => setStage('confirmed'), 1300);
-    return () => clearTimeout(t);
-  }, [stage]);
+    let cancelled = false;
+    const settle = async () => {
+      try {
+        if (DEV_AUTH) await devSignIn(email);
+        await new Promise((r) => setTimeout(r, 700));
+        if (!cancelled) setStage('confirmed');
+      } catch (e) {
+        if (!cancelled) {
+          setError(e instanceof Error ? e.message : 'Could not sign in');
+          setStage('email');
+        }
+      }
+    };
+    void settle();
+    return () => {
+      cancelled = true;
+    };
+  }, [stage, email]);
 
   function handleDigit(idx: number, value: string) {
     const ch = value.replace(/\D/g, '').slice(-1);
@@ -46,7 +71,10 @@ export default function AuthFlow({ next }: { next?: string | null }) {
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            if (email.trim()) setStage('otp');
+            if (email.trim()) {
+              setError(null);
+              setStage('otp');
+            }
           }}
         >
           <div className="field">
@@ -62,6 +90,7 @@ export default function AuthFlow({ next }: { next?: string | null }) {
             />
           </div>
           <button type="submit" className="btn">Send one-time code</button>
+          {error ? <p className="file-msg error">{error}</p> : null}
         </form>
       </section>
     );

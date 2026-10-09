@@ -168,6 +168,29 @@ body {
   margin-top: var(--s2);
 }
 
+/* The "signed in as …" line: a quiet credit under the standfirst, not a
+   headline — it is a status, and the desk's job is the form below it. */
+.desk-who {
+  margin-top: var(--s3);
+}
+
+/* A button that reads as a link: it is an action, not a destination, so it
+   keeps button semantics, but it must not compete with "File it". */
+.linkish {
+  font: inherit;
+  color: var(--accent);
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.linkish:hover {
+  color: var(--ink);
+}
+
 /* The filing form: the one job this page exists to do, so it gets room. */
 .file-form {
   border-top: 3px double var(--ink);

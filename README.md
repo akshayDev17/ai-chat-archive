@@ -226,19 +226,32 @@ Open <http://127.0.0.1:3000/chat-archives>.
 The frontend defaults to `http://127.0.0.1:8787` for the API; override with
 `NEXT_PUBLIC_API_BASE`.
 
-The local server stands in for Cloudflare Access with a fixed reader
-(`DEV_EMAIL`, default `akshay@akshayprabhakant.com`). To watch the signed-out
-state:
+Copy `.env.local.example` to `.env.local` to enable local sign-in. The backend
+is **anonymous by default**, so the real journey is walkable on your machine:
 
-```bash
-DEV_EMAIL= python3 backend/local_server.py          # every shelf is 401
-curl -H 'X-Archive-Email;' localhost:8787/api/sessions   # 401, one request
-curl -H 'X-Archive-Email: guest@example.com' localhost:8787/api/sessions
+```
+/chat-archives      Sign in →        (signed out)
+/chat-archives/login                email → code → verified
+/chat-archives/desk File a session  (now signed in)
+/chat-archives      Copy desk →     (masthead flips)
 ```
 
-`X-Archive-Email` exists **only** in the local server. The deployed Worker
-derives identity from its `IdentityProvider` and never trusts a client header,
-because a client can lie.
+"Send one-time code" calls `POST /api/dev/session`, which sets the
+`archive_dev_email` cookie (with `NEXT_PUBLIC_DEV_AUTH=1`). No OTP is sent and
+none is checked — it stands in for the identity provider, which is still
+undecided. The desk has a **Sign out** so you can walk the flow again.
+
+```bash
+DEV_EMAIL=you@example.com python3 backend/local_server.py  # skip signing in
+curl -H 'X-Archive-Email;' localhost:8787/api/whoami       # force anonymous
+curl -H 'X-Archive-Email: guest@example.com' localhost:8787/api/filings
+```
+
+Identity precedence locally: `X-Archive-Email` header → `archive_dev_email`
+cookie → `DEV_EMAIL`. All three exist **only** in `local_server.py`. The
+deployed Worker derives identity from its `IdentityProvider` and never trusts a
+client header or cookie, because a client can lie — and an endpoint that mints
+identities is exactly what must never ship.
 
 ## Deploy
 

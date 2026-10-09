@@ -1,16 +1,17 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ingestSession, isSignInRequired, whoami } from '@/lib/api';
+import { DEV_AUTH, devSignOut, ingestSession, isSignInRequired, whoami } from '@/lib/api';
 import { AFTER_SIGN_IN } from '@/lib/nav';
 
 /**
  * The copy desk: where a share link becomes a story in the paper.
  *
- * This is the surface Cloudflare's one-time PIN opens up. It is deliberately
- * NOT the front page — reading and filing are different jobs, and the front
- * page is public while this is not.
+ * This is the surface the sign-in flow opens up. It is deliberately NOT the
+ * front page — reading and filing are different jobs, and the front page is
+ * public while this is not.
  *
  * The page enforces its own gate rather than relying on the router, because
  * the gate is a *server* fact: `POST /api/ingest` answers 401 to anyone without
@@ -49,10 +50,25 @@ export default function CopyDesk() {
     };
   }, [router]);
 
+  async function signOut() {
+    await devSignOut();
+    // A full navigation, not router.push: the masthead resolves identity on
+    // mount, and the shell needs to re-read it.
+    router.replace('/chat-archives');
+    router.refresh();
+  }
+
   if (checking) return <p className="fine">Opening the copy desk…</p>;
 
   return (
     <div className="desk">
+      {/* Mirrors the reader's "← All sessions": without it, the desk is a dead
+          end — the masthead here has no actions slot by design, so the only way
+          back to the paper would be the browser's back button. */}
+      <Link href="/chat-archives" className="back">
+        ← The edition
+      </Link>
+
       <section className="desk-intro">
         {/* The masthead already names the place ("Copy desk"), so the kicker
             names the task instead of repeating it. */}
@@ -60,7 +76,20 @@ export default function CopyDesk() {
         <h1 className="hl">File a session</h1>
         <p className="standfirst">
           Paste a share link and it is set into the paper: the summary report as the article,
-          the transcript as the interview. Signed in as <em>{email}</em>.
+          the transcript as the interview.
+        </p>
+        <p className="fine desk-who">
+          Signed in as <em>{email}</em>
+          {DEV_AUTH ? (
+            <>
+              {' · '}
+              {/* Local only. In production, signing out belongs to whatever
+                  provider establishes the session, not to this page. */}
+              <button type="button" className="linkish" onClick={signOut}>
+                Sign out
+              </button>
+            </>
+          ) : null}
         </p>
       </section>
 

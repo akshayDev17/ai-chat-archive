@@ -72,6 +72,40 @@ export function ingestSession(shareUrl: string): Promise<IngestResult> {
 }
 
 /**
+ * Whether a real sign-in provider is wired up yet.
+ *
+ * It is not: the one-time-PIN provider is still undecided (Cloudflare sending
+ * the code, or the Worker sending it via an email service). Until that is
+ * chosen, `AuthFlow` cannot complete a production sign-in, so it only *tries*
+ * when explicitly told it may — see `devSignIn` below.
+ */
+export const DEV_AUTH = process.env.NEXT_PUBLIC_DEV_AUTH === '1';
+
+/**
+ * Local-only sign-in: sets the `archive_dev_email` cookie.
+ *
+ * This stands in for the identity provider so the flow you actually asked for
+ * is walkable on the only machine it can be run on: public edition → Sign in →
+ * login → desk. The endpoint exists solely in `backend/local_server.py`; the
+ * deployed Worker has no equivalent, which is why this must stay behind
+ * `DEV_AUTH` rather than being called unconditionally.
+ */
+export function devSignIn(email: string): Promise<{ email: string }> {
+  return request<{ email: string }>('/api/dev/session', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ email }),
+  });
+}
+
+/** Local-only sign-out, so the signed-out state is reachable again. */
+export function devSignOut(): Promise<void> {
+  return request<Record<string, never>>('/api/dev/session', { method: 'DELETE' }).then(
+    () => undefined,
+  );
+}
+
+/**
  * The URL the sign-in screen navigates to in order to authenticate.
  *
  * **This must be a top-level navigation, not a `fetch()`.** Cloudflare Access
