@@ -247,6 +247,18 @@ closed and every protected route 401s with no explanation.
 
 ---
 
+## 4a. Ingest returns 403 from the Worker — read this first
+
+**The Worker cannot fetch ChatGPT share pages with `fetch()`.** Cloudflare's
+runtime stamps every subrequest with `Cf-Worker`, ChatGPT's edge sees it, and
+refuses. It cannot be overridden, and it is not our bug.
+
+Full evidence, and the way through via `cloudflare:sockets`:
+**`docs/worker-fetch-block.md`**.
+
+This does not block reading, the API, D1 or Access. It blocks *ingest* — the one
+route that fetches an external page.
+
 ## 4b. Running the real Worker locally — the sandbox
 
 **`pywrangler dev` boots `entry.py` in the real workerd runtime against a local
