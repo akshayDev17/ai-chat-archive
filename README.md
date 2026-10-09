@@ -203,7 +203,23 @@ python3 backend/local_server.py            # → http://127.0.0.1:8787
 
 # frontend (separate terminal)
 cd frontend && npm install && npm run dev  # → http://127.0.0.1:3000
+
+# typecheck + production build — safe to run WHILE the dev server is up
+cd frontend && npx tsc --noEmit && npm run build:check
 ```
+
+Use `build:check`, not `build`, while developing. `next dev` and `next build`
+both own `.next/` and both rewrite the webpack chunk graph inside it, so a plain
+build against a live dev server corrupts it — the build replaces chunks the dev
+server's `webpack-runtime.js` still points at, and every request then fails with
+`Cannot find module './NN.js'`. `build:check` sets `NEXT_DIST_DIR`, so it writes
+`.next-build/` and the two never touch. If it has already happened:
+
+```bash
+kill $(lsof -nP -iTCP:3000 -sTCP:LISTEN -t); rm -rf frontend/.next; cd frontend && npm run dev
+```
+
+`build:check` is what CI should run; `build` is for a clean checkout.
 
 Open <http://127.0.0.1:3000/chat-archives>.
 
