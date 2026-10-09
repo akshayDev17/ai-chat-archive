@@ -240,12 +240,37 @@ The docs on storing it: "Don't store the value of `CLOUDFLARE_API_TOKEN` in your
 repository, as it gives access to deploy Workers on your account."
 — <https://developers.cloudflare.com/workers/ci-cd/external-cicd/github-actions/>
 
-Recommended shape, once the frontend topology is settled:
+**This is built: `.github/workflows/ci.yml`.**
 
-1. **test** — `pytest` over `backend/`, `npm run test:lib`, `tsc --noEmit`,
-   `npm run build:check`. All four run offline and take seconds.
-2. **deploy-api** — `d1 migrations apply --remote`, then `pywrangler deploy`.
-3. **deploy-web** — only if OpenNext is chosen.
+- **`test`** — runs on every push and pull request. Backend tests twice, once as
+  scripts and once through pytest, then `npm ci`, `npm run test:lib`,
+  `tsc --noEmit` and `npm run build:check`.
+- **`deploy-api`** — `main` only, after `test` passes: a secrets check, a D1
+  permission check, `d1 migrations apply --remote`, `pywrangler deploy`, then a
+  health check against the deployed Worker.
+
+`test_decode.py` is the one backend test that touches the network, and the
+workflow sets `ARCHIVE_LIVE_TESTS=0` so it skips itself. A build that goes red
+because ChatGPT rate-limited us, or decided runner traffic looked like a bot,
+says nothing about the change under test.
+
+A **`deploy-web`** job is still to come, and its shape depends on §1.
+
+### The D1 check, and why it is a step of its own
+
+The deploy job calls
+
+```
+GET /accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database
+```
+
+before doing anything, and fails with the fix in the message if the token cannot
+reach D1. Without it, a token missing `D1 Edit` produces the worst outcome
+available: the migration step fails or does nothing, the deploy step succeeds,
+and the pipeline is green on a database that never got its tables.
+
+`scripts/setup-cloudflare.sh` performs the same check while you are still in the
+browser, which is when it is cheap to fix.
 
 ---
 

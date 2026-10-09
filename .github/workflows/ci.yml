@@ -1,0 +1,181 @@
+name: CI
+
+# Tests run on every push and every pull request. The deploy runs only on
+# main, and only after the tests have passed.
+#
+# The frontend is tested here but not deployed: its Cloudflare topology is
+# still undecided (one Worker or two), so there is no deploy job to write yet.
+# Testing it does not depend on that decision and costs a couple of minutes.
+# See docs/deploy.md §1.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A second push to the same branch cancels the first, so a stale run never
+# reports on code that has already been replaced.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    env:
+      # test_decode.py fetches a live ChatGPT share page. Off in CI on purpose:
+      # a build that goes red because a third party was slow, rate-limited us,
+      # or decided our requests looked like a bot tells you nothing about the
+      # change under test. The other four backend tests are offline.
+      ARCHIVE_LIVE_TESTS: "0"
+    steps:
+      - uses: actions/checkout@v6
+
+      # ── backend ──────────────────────────────────────────────────────────
+      # The suite is stdlib unittest with no dependencies, so it runs on the
+      # interpreter the runner already has. Also exercised through pytest,
+      # which is what `backend/pyproject.toml` declares — that config pointed
+      # at a `src/` directory which no longer exists until recently, and this
+      # is the job that would have caught it.
+      - name: Backend — run each test file
+        working-directory: backend
+        run: |
+          shopt -s nullglob
+          files=(test/test_*.py)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "::error::no backend tests found — the glob matched nothing"
+            exit 1
+          fi
+          fail=0
+          for t in "${files[@]}"; do
+            echo "::group::$t"
+            python3 "$t" || fail=1
+            echo "::endgroup::"
+          done
+          exit $fail
+
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Backend — run through pytest
+        working-directory: backend
+        run: |
+          uvx --with pytest pytest -q
+
+      # ── frontend ─────────────────────────────────────────────────────────
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Frontend — install
+        working-directory: frontend
+        run: npm ci
+
+      - name: Frontend — library tests
+        working-directory: frontend
+        run: npm run test:lib
+
+      - name: Frontend — typecheck
+        working-directory: frontend
+        run: npx tsc --noEmit
+
+      # build:check, not build: it writes .next-build/ so it cannot collide
+      # with a dev server's .next/. Harmless here, and it keeps CI on the same
+      # command a human runs locally.
+      - name: Frontend — production build
+        working-directory: frontend
+        run: npm run build:check
+
+  deploy-api:
+    name: Deploy API
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    environment: production
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v6
+
+      # Fails loudly and early rather than halfway through a deploy. Secrets
+      # are not exposed to pull requests from forks, and a missing one here
+      # produces a confusing auth error several steps later otherwise.
+      - name: Check the deployment secrets exist
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          missing=0
+          for v in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID; do
+            if [ -z "${!v}" ]; then
+              echo "::error::$v is not set. Run scripts/setup-cloudflare.sh, or add it under Settings → Secrets and variables → Actions."
+              missing=1
+            fi
+          done
+          exit $missing
+
+      # Prove the token actually carries D1 before relying on it.
+      #
+      # The "Edit Cloudflare Workers" template does not include any D1
+      # permission, and neither does the token Workers Builds generates. Without
+      # this check the deploy below succeeds and the migration above it fails —
+      # or worse, silently does nothing — which is a broken pipeline with a
+      # green tick.
+      - name: Check the token can reach D1
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          body=$(curl -sS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database")
+          if ! printf '%s' "$body" | grep -q '"success": *true'; then
+            echo "::error::This token cannot reach D1. Add 'Account · D1 · Edit' to it (API tokens → Edit), then re-run. Cloudflare said:"
+            printf '%s\n' "$body" | head -c 400
+            exit 1
+          fi
+          echo "Token can reach D1."
+
+      # Migrations before the deploy: the new Worker may depend on a table the
+      # old one never created. `migrations apply` is idempotent — it applies
+      # only what the d1_migrations table says is outstanding — so this is safe
+      # to run on every push.
+      #
+      # Plain `wrangler`, not `pywrangler`: D1 has nothing to do with the
+      # Worker's runtime, and pywrangler wraps wrangler for the Python build
+      # specifically. Keeping the language-specific tool for the language-
+      # specific step means a change to pywrangler cannot break migrations.
+      - name: Apply D1 migrations
+        working-directory: backend
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx --yes wrangler d1 migrations apply ai-chat-archive --remote
+
+      - name: Deploy the Worker
+        working-directory: backend
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: uv run pywrangler deploy
+
+      # A deploy that reports success and serves 500s is not a deploy. This is
+      # also the check that tells us whether Python Workers expose self.ctx:
+      # ctx.access is documented for JavaScript only, so /api/health exists to
+      # answer the question rather than let us assume it.
+      - name: Verify the deployed Worker answers
+        run: |
+          url="https://akshayprabhakant.com/api/health"
+          for attempt in 1 2 3 4 5; do
+            body=$(curl -sS --max-time 20 "$url" || true)
+            if [ -n "$body" ]; then break; fi
+            echo "no response yet (attempt $attempt/5)"
+            sleep 5
+          done
+          if [ -z "$body" ]; then
+            echo "::error::$url did not answer after the deploy"
+            exit 1
+          fi
+          echo "$body"
+          printf '%s' "$body" | grep -q '"context_available": *true' || \
+            echo "::warning::context_available is not true — check docs/access-limits.md before relying on Access for identity"

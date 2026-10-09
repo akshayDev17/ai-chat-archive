@@ -5,10 +5,18 @@ extraction. The Workers-specific pieces (js.fetch, D1) are exercised only at
 deploy; this test proves the decoding/parsing core end to end.
 
 Run:  python backend/test/test_decode.py
+
+This is the only test here that touches the network, and it fetches a page from
+ChatGPT. That is fine for a human checking their work and wrong for CI: it would
+make every push depend on a third party staying reachable and on our traffic not
+being mistaken for a bot, so a red build would say nothing about the change
+under test. CI therefore sets ARCHIVE_LIVE_TESTS=0 and this skips itself with a
+reason. Default is to run, because locally it is the useful thing.
 """
 
 from __future__ import annotations
 
+import os
 import sys
 import urllib.request
 from pathlib import Path
@@ -30,6 +38,11 @@ def fetch_html(url: str) -> str:
 
 
 def main() -> int:
+    if os.environ.get("ARCHIVE_LIVE_TESTS", "1") != "1":
+        print("SKIPPED — ARCHIVE_LIVE_TESTS is not 1, so the live network test is off.")
+        print("         (CI sets this. Remove it, or set it to 1, to run for real.)")
+        return 0
+
     print(f"fetching {SHARE_URL} ...")
     html = fetch_html(SHARE_URL)
 

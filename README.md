@@ -263,7 +263,14 @@ identities is exactly what must never ship.
 
 ## Deploy
 
-Nothing is deployed yet. **`docs/deploy.md` is the full guide** — it opens with
+**Run `./scripts/setup-cloudflare.sh`.** It opens each page, says what to click,
+captures what comes back and verifies it — including the step everyone gets
+wrong, adding `D1 Edit` to the API token, which the Cloudflare template does not
+include and whose absence otherwise produces a deploy that succeeds while the
+migration silently cannot run.
+
+**`docs/deploy.md` is the full guide**, and **`.github/workflows/ci.yml`** is the
+pipeline. Nothing is deployed yet; the guide — it opens with
 the one decision that shapes the rest (one Worker or two, one domain or two) and
 carries the citations for every claim.
 
