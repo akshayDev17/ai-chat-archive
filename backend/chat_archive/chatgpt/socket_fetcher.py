@@ -242,7 +242,7 @@ class SocketShareFetcher(ShareFetcher):
         host, path = self._host, f"{self._base_path}/{share_id}"
 
         for _ in range(self._max_redirects + 1):
-            response = await self._request(host, path)
+            response = await self._request_with_retry(host, path)
 
             if response.status in REDIRECT_STATUSES and "location" in response.headers:
                 host, path = resolve_location(response.headers["location"], host)
@@ -254,6 +254,24 @@ class SocketShareFetcher(ShareFetcher):
             return response.body.decode("utf-8", "replace")
 
         raise FetchError(f"Share page redirects exceeded {self._max_redirects}")
+
+    async def _request_with_retry(self, host: str, path: str) -> HttpResponse:
+        """One request, retried once if the stream is cut short mid-body.
+
+        ``_request`` tolerates the peer closing a ``Connection: close`` response
+        as a stream cancellation instead of EOF, but that close can still arrive
+        before the last bytes, leaving the body truncated. A truncated share
+        page parses into a conversation that looks valid and is quietly missing
+        its final turns, so a truncation is retried once rather than accepted.
+        Two truncations in a row are still surfaced loudly.
+        """
+        last = None
+        for _ in range(2):
+            try:
+                return await self._request(host, path)
+            except IncompleteResponse as exc:
+                last = exc
+        raise last
 
     async def _request(self, host: str, path: str) -> HttpResponse:
         """One request/response over a raw socket.
@@ -281,7 +299,14 @@ class SocketShareFetcher(ShareFetcher):
         reader = connection.readable.getReader()
         raw = bytearray()
         while True:
-            chunk = await reader.read()
+            try:
+                chunk = await reader.read()
+            except Exception:
+                # The runtime cancels the socket's readable stream when the
+                # peer closes a `Connection: close` response, rather than
+                # signalling EOF. Treat that as end-of-input: parse_response()
+                # below rejects a truncated body instead of returning it.
+                break
             if chunk.done:
                 break
             raw += bytes(chunk.value.to_py())
