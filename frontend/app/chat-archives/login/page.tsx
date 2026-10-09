@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import AuthFlow from '../../components/AuthFlow';
 import Masthead from '../../components/Masthead';
 
@@ -47,6 +48,18 @@ export default async function LoginPage({
   return (
     <main className="frame">
       <Masthead section="Reader access" />
+
+      {/* Every page except the edition itself carries a way back to it, and
+          this one was the gap: the masthead here has no actions slot (there is
+          no point offering "Sign in" on the sign-in page), the nameplate is not
+          a link, and AuthFlow is a form with no exit. So a visitor who landed
+          on /chat-archives/login by any route other than the masthead button —
+          a shared link, a bookmark, a redirect from the desk — had only the
+          browser's back button. */}
+      <Link href="/chat-archives" className="back">
+        ← The edition
+      </Link>
+
       <AuthFlow next={next} />
     </main>
   );

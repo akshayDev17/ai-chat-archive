@@ -65,7 +65,7 @@ export default function AuthFlow({ next }: { next?: string | null }) {
   if (stage === 'email') {
     return (
       <section>
-        <div className="kicker">Reader access</div>
+        <div className="kicker">Sign in</div>
         <h1 className="hl">Sign in to the archive</h1>
         <p className="standfirst">A one-time code is emailed — no password is ever stored.</p>
         <form
@@ -100,7 +100,7 @@ export default function AuthFlow({ next }: { next?: string | null }) {
   if (stage === 'otp') {
     return (
       <section>
-        <div className="kicker">Reader access</div>
+        <div className="kicker">One-time code</div>
         <h1 className="hl">Enter the six-digit code</h1>
         <p className="standfirst">
           Emailed to <em>{email}</em> · the code expires in 10 minutes.
@@ -139,7 +139,7 @@ export default function AuthFlow({ next }: { next?: string | null }) {
   if (stage === 'verifying') {
     return (
       <section>
-        <div className="kicker">Reader access</div>
+        <div className="kicker">Verifying</div>
         <h1 className="hl">Verifying your code…</h1>
         <div className="spinner" aria-hidden="true" />
         <p className="fine">Checking the one-time code against the ledger.</p>
@@ -150,7 +150,7 @@ export default function AuthFlow({ next }: { next?: string | null }) {
   // ── confirmed ──────────────────────────────────────
   return (
     <section>
-      <div className="kicker">Reader access</div>
+      <div className="kicker">Signed in</div>
       <div className="check" aria-hidden="true">✓</div>
       <h1 className="hl">You are on the desk</h1>
       <p className="standfirst">Signed in. The copy desk is open — file a share link to set it.</p>
