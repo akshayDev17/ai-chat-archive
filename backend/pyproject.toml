@@ -4,12 +4,23 @@ version = "0.1.0"
 description = "Python backend that ingests ChatGPT share links into Cloudflare D1."
 requires-python = ">=3.11"
 
-[project.optional-dependencies]
-# The tests are stdlib `unittest` and run directly:
-#   python3 backend/test/test_ownership.py
-# pytest is optional, and only there so a CI job can run the whole directory in
-# one command instead of four.
-dev = ["pytest>=8"]
+# Development dependencies, as a PEP 735 dependency group rather than an
+# optional-dependencies extra.
+#
+# The difference is not cosmetic: `uv run` installs the `dev` *group* by
+# default and does NOT install optional extras, so a `[project.optional-
+# dependencies]` entry would leave `uv run pywrangler deploy` unable to find
+# pywrangler. Which is exactly what happened — the deploy failed with
+# "Failed to spawn: `pywrangler`", because the tool was never installed.
+#
+# workers-py is what provides the `pywrangler` command:
+#   "This will create a pyproject.toml file with workers-py as a development
+#    dependency." — https://developers.cloudflare.com/workers/languages/python/
+[dependency-groups]
+dev = [
+  "workers-py",
+  "pytest>=8",
+]
 
 [tool.pytest.ini_options]
 # `"."` — the backend root, which is what makes `import chat_archive` resolve.

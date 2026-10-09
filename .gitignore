@@ -3,6 +3,9 @@ __pycache__/
 *.py[cod]
 .venv/
 venv/
+# Local Worker state: wrangler's cache and the --local D1 database. Per-machine,
+# and the local database is rebuilt from migrations anyway.
+.wrangler/
 
 # Node / Next.js
 node_modules/

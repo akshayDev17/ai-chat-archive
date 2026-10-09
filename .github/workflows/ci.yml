@@ -57,10 +57,18 @@ jobs:
 
       - uses: astral-sh/setup-uv@v6
 
+      # `uv sync` then `uv run`, not `uvx --with pytest`: this resolves the
+      # project's own dev dependency group, which is what provides pywrangler.
+      # That group was missing `workers-py` once, and the only symptom was a
+      # deploy failing with "Failed to spawn: pywrangler" — a bug CI should
+      # have caught and would not have, running an ephemeral pytest instead.
+      - name: Backend — sync the dev environment
+        working-directory: backend
+        run: uv sync
+
       - name: Backend — run through pytest
         working-directory: backend
-        run: |
-          uvx --with pytest pytest -q
+        run: uv run pytest -q
 
       # ── frontend ─────────────────────────────────────────────────────────
       - uses: actions/setup-node@v4

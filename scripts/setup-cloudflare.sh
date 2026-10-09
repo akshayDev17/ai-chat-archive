@@ -381,15 +381,40 @@ fi
 # ── 5 ─────────────────────────────────────────────────────────────────────
 stage "Deploy the API Worker"
 say "Python Workers deploy through pywrangler, which wraps wrangler."
-_npm_note=""
 _have uv || { warn "uv is not installed, and pywrangler needs it."; note "Install: curl -LsSf https://astral.sh/uv/install.sh | sh"; exit 1; }
+
+# Sync first, so the virtualenv matches pyproject before anything is spawned.
+#
+# This is the step that installs pywrangler, which arrives as the `workers-py`
+# dev dependency. Going straight to `uv run pywrangler deploy` is how the first
+# run of this wizard failed: a bare "Failed to spawn: `pywrangler`" that says
+# nothing about the cause and sends you looking at Cloudflare instead of at a
+# missing line in pyproject.toml.
+say "Syncing the Python environment (this is what installs pywrangler)..."
+if ! out=$(cd backend && uv sync 2>&1); then
+  warn "uv sync failed:"; printf '%s\n' "$out" | tail -15 | sed 's/^/    /'; exit 1
+fi
+if ! (cd backend && uv run pywrangler --version >/dev/null 2>&1); then
+  warn "uv sync succeeded but pywrangler still does not resolve."
+  note "Check that 'workers-py' is in the dev dependency group in"
+  note "backend/pyproject.toml — it is what provides the pywrangler command."
+  exit 1
+fi
+printf '  %s✓%s pywrangler is installed\n' "$GREEN" "$RESET"
+
 if confirm "Run 'uv run pywrangler deploy' now?"; then
   if ! out=$(cd backend && CLOUDFLARE_API_TOKEN="$CLOUDFLARE_API_TOKEN" \
       CLOUDFLARE_ACCOUNT_ID="$CLOUDFLARE_ACCOUNT_ID" uv run pywrangler deploy 2>&1); then
     warn "Deploy failed:"; printf '%s\n' "$out" | tail -25 | sed 's/^/    /'
-    note "Routes attach to a zone, so a zone or DNS problem surfaces here."
+    if printf '%s' "$out" | grep -q 'Failed to spawn'; then
+      note "That is a missing tool, not a problem with Cloudflare."
+      note "Run 'cd backend && uv sync' and try again."
+    else
+      note "Routes attach to a zone, so a zone or DNS problem surfaces here."
+    fi
     exit 1
   fi
+
   printf '%s\n' "$out" | tail -12 | sed 's/^/    /'
   printf '  %s✓%s deployed\n' "$GREEN" "$RESET"
 else
