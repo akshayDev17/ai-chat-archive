@@ -771,8 +771,14 @@ body {
   width: 26px;
   height: 26px;
   border-radius: 50%;
-  background: var(--ink);
-  color: var(--paper);
+  /* White, with the logo in ink. Knocked out of a black disc the mark read as a
+     sticker of itself: brand marks are drawn to sit on light ground, and
+     inverting one costs it the interior detail that makes it recognisable.
+     A hairline keeps the white disc from reading as a hole punched in the
+     paper, which is what it does without one. */
+  background: var(--card);
+  color: var(--ink);
+  border: 1px solid var(--rule);
   display: grid;
   place-items: center;
   margin-top: 2px;
@@ -1081,6 +1087,10 @@ body {
   margin-top: 2px;
 }
 
+/* A vendor's own mark. The element is a *mask*, so `background-color` is the
+   fill of the logo shape itself, not a tile behind it — there is no black
+   background here to remove, and the ink fill already sits on the card. A border
+   would be masked away with everything else outside the logo. */
 .src-icon-vendor {
   background-color: var(--ink);
   mask-repeat: no-repeat;
