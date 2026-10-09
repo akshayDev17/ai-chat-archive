@@ -66,7 +66,7 @@ export function getSession(id: string): Promise<SessionDetail> {
 }
 
 export function ingestSession(shareUrl: string): Promise<IngestResult> {
-  return request<IngestResult>('/api/ingest', {
+  return request<IngestResult>('/api/desk/ingest', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ share_url: shareUrl }),
@@ -121,5 +121,5 @@ export function devSignOut(): Promise<void> {
  * which is scoped to the domain, not the path — is attached on the way back.
  */
 export function signInUrl(next = '/chat-archives/desk'): string {
-  return `${API_BASE}/api/session/start?next=${encodeURIComponent(next)}`;
+  return `${API_BASE}/api/desk/enter?next=${encodeURIComponent(next)}`;
 }

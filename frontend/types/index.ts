@@ -14,7 +14,7 @@ export interface Session {
 }
 
 export interface SessionListResponse {
-  /** Present only on the owner-scoped `/api/filings` read. */
+  /** Present only on the owner-scoped `/api/desk/filings` read. */
   owner?: string;
   sessions: Session[];
 }

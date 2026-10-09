@@ -311,18 +311,18 @@ has to send the browser somewhere Access will catch it:
   /chat-archives/login          our Rail screen        (public)
         │  "Send one-time code" is a navigation, not a fetch
         ▼
-  /api/session/start?next=…     protected path         (Access intercepts here)
+  /api/desk/enter?next=…     protected path         (Access intercepts here)
         │  Access redirects to <team>.cloudflareaccess.com
         ▼
   Cloudflare's OTP screen       their domain           (the one thing we can't style)
         │  code accepted; CF_Authorization cookie set on our domain
         ▼
-  /api/session/start?next=…     now authenticated → 302
+  /api/desk/enter?next=…     now authenticated → 302
         ▼
   /chat-archives                your shelf
 ```
 
-`GET /api/session/start` exists purely to be that catching point, and because
+`GET /api/desk/enter` exists purely to be that catching point, and because
 Access only lets authenticated requests reach the Worker, arriving at it *is*
 proof of authentication — it just redirects to `next`. Implemented in
 `entry.py::_session_start`, with the local-server equivalent so the flow can be
@@ -361,13 +361,13 @@ turns "the desk" into a single path that can carry a policy on its own:
 | Access application | Covers |
 |---|---|
 | `akshayprabhakant.com/chat-archives/desk` | **the only path worth protecting** |
-| `…/api/ingest` | the filing endpoint |
+| `…/api/desk/ingest` | the filing endpoint |
 | everything else | public, no policy needed |
 
 The remaining choice is only about where the code is typed:
 
 **Option A — Cloudflare sends the PIN.**
-The desk's sign-in screen navigates to `/api/session/start`, Access catches it,
+The desk's sign-in screen navigates to `/api/desk/enter`, Access catches it,
 the visitor types the code on Cloudflare's page, and lands back on the desk with
 the cookie set. No email provider, no auth code of ours. We must first verify
 Python exposes `ctx.access` (§8) or every filing 401s.

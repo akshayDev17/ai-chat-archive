@@ -7,7 +7,7 @@
  * backend sanitizes its `Location` header (`chat_archive/urls.py`): a same-site
  * absolute path, or nothing.
  *
- * The backend guards its own copy of this for the `/api/session/start`
+ * The backend guards its own copy of this for the `/api/desk/enter`
  * redirect. Duplicating the rule on both sides is deliberate — they are
  * different sinks (a `Location` header versus a client-side navigation) reached
  * by different code paths, and either one being unguarded is a phishing bug.

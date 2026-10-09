@@ -71,7 +71,7 @@ chosen, a local server stands in for it.
 | `/chat-archives/desk` — file copy | redirected to sign in | the filing form |
 
 One rule, stated once: **public reads, private writes.** The only gated actions
-are `POST /api/ingest` and `GET /api/filings`.
+are `POST /api/desk/ingest` and `GET /api/desk/filings`.
 
 Ownership is still recorded (`conversations.owner_email`) but it is *provenance,
 not an access boundary*, and it never leaves the server on a read: it keys the
@@ -252,7 +252,7 @@ undecided. The desk has a **Sign out** so you can walk the flow again.
 ```bash
 DEV_EMAIL=you@example.com python3 backend/local_server.py  # skip signing in
 curl -H 'X-Archive-Email;' localhost:8787/api/whoami       # force anonymous
-curl -H 'X-Archive-Email: guest@example.com' localhost:8787/api/filings
+curl -H 'X-Archive-Email: guest@example.com' localhost:8787/api/desk/filings
 ```
 
 Identity precedence locally: `X-Archive-Email` header → `archive_dev_email`

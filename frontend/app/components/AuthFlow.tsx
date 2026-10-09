@@ -16,7 +16,7 @@ type Stage = 'email' | 'otp' | 'verifying' | 'confirmed';
  *
  * **No identity provider is wired up yet.** The one-time PIN is undecided —
  * either Cloudflare mails it (our screen hands the browser to Access via
- * `/api/session/start`) or the Worker mails it via an email service. Until that
+ * `/api/desk/enter`) or the Worker mails it via an email service. Until that
  * is chosen, the OTP stages below cannot be real, so when `DEV_AUTH` is on the
  * flow calls the local dev sign-in instead, which sets a cookie. That is what
  * makes the whole journey walkable locally; in production the button becomes a

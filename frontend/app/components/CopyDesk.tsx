@@ -14,7 +14,7 @@ import { AFTER_SIGN_IN } from '@/lib/nav';
  * public while this is not.
  *
  * The page enforces its own gate rather than relying on the router, because
- * the gate is a *server* fact: `POST /api/ingest` answers 401 to anyone without
+ * the gate is a *server* fact: `POST /api/desk/ingest` answers 401 to anyone without
  * an identity. Bouncing to the sign-in screen (with `next` pointing back here)
  * is the friendly rendering of that same fact, not a substitute for it.
  *

@@ -12,7 +12,7 @@ Two things this file has to get right:
 
 2. **Public reading, private filing.** The archive is a newspaper: the front
    page and every story are readable by anyone, with no identity at all. The
-   only gated actions are filing copy (``POST /api/ingest``) and seeing your own
+   only gated actions are filing copy (``POST /api/desk/ingest``) and seeing your own
    filings. So the split is "public reads, private writes" — one rule, easy to
    check, and expressed as two contiguous blocks in :meth:`Default.fetch`.
 
@@ -90,8 +90,8 @@ class Default(WorkerEntrypoint):
             # anonymous is the expected state for most visitors to a public
             # archive, and a 401 here makes every browser log a console error on
             # every page view for the entire public audience. 401 is reserved
-            # for the routes that actually withhold something (`/api/filings`,
-            # `/api/ingest`).
+            # for the routes that actually withhold something (`/api/desk/filings`,
+            # `/api/desk/ingest`).
             identity = await self._identity_provider().identify(request)
             return _json({"email": identity.email if identity else None})
 
@@ -109,13 +109,13 @@ class Default(WorkerEntrypoint):
         if identity is None:
             return _json({"error": "sign-in required"}, status=401)
 
-        if path.endswith("/api/filings") and method == "GET":
+        if path.endswith("/api/desk/filings") and method == "GET":
             return await self._filings(identity)
 
-        if path.endswith("/api/ingest") and method == "POST":
+        if path.endswith("/api/desk/ingest") and method == "POST":
             return await self._ingest(request, identity)
 
-        if path.endswith("/api/session/start"):
+        if path.endswith("/api/desk/enter"):
             return self._session_start(request)
 
         return Response("Not found", status=404)

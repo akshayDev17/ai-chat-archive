@@ -12,7 +12,7 @@ It reuses the exact same ports / service / parser / decoder / router semantics
 as the Worker, so what runs here is the real backend logic, just wired to local
 stand-ins. The public-read / private-filing split is enforced identically:
 ``GET /api/sessions`` and ``GET /api/sessions/<id>`` are open to anyone, while
-``POST /api/ingest`` and ``GET /api/filings`` are 401 without an identity.
+``POST /api/desk/ingest`` and ``GET /api/desk/filings`` are 401 without an identity.
 
 Identity, in precedence order:
 
@@ -262,7 +262,7 @@ class Handler(BaseHTTPRequestHandler):
             # here would put a console error on every page view.
             return self._json({"email": self._identity() or None})
 
-        if path == "/api/session/start":
+        if path == "/api/desk/enter":
             # The sign-in handoff. In production this path sits behind Access,
             # so reaching it *means* Cloudflare already authenticated the
             # visitor and we only have to send them onward. Locally there is no
@@ -279,7 +279,7 @@ class Handler(BaseHTTPRequestHandler):
             # identity. Owned by nobody in particular — every filer's copy.
             return self._json({"sessions": asyncio.run(repo.list_all())})
 
-        if path == "/api/filings":
+        if path == "/api/desk/filings":
             email = self._identity()
             if not email:
                 return self._json({"error": "sign-in required"}, 401)
@@ -303,7 +303,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/dev/session":
             return self._dev_sign_in()
 
-        if path != "/api/ingest":
+        if path != "/api/desk/ingest":
             return self._json({"error": "not found"}, 404)
 
         email = self._identity()
