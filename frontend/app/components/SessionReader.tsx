@@ -9,9 +9,34 @@ import rehypeRaw from 'rehype-raw';
 import { getSession } from '@/lib/api';
 import { linkifyCitations } from '@/lib/citations';
 import { splitMention, toChatItems } from '@/lib/chat';
+import { vendorLabel, vendorMark } from '@/lib/vendors';
 import type { SessionDetail } from '@/types';
+import SourcesPanel from './SourcesPanel';
 
 export type ReaderMode = 'report' | 'chat';
+
+/**
+ * The mark beside each assistant turn: the vendor that produced the reply.
+ *
+ * Was a generic four-point star, which said "an AI wrote this" and nothing
+ * else. The archive is meant to hold more than one tool, so it says *which* —
+ * falling back to the star for a vendor with no mark yet (Elicit), which also
+ * keeps the shape familiar while it waits for its file.
+ */
+function BotMark({ vendor, className }: { vendor: string; className?: string }) {
+  const mark = vendorMark(vendor);
+  if (mark) {
+    return (
+      <span
+        className={`${className ?? ''} bot-mark`}
+        style={{ maskImage: `url(${mark})`, WebkitMaskImage: `url(${mark})` }}
+        role="img"
+        aria-label={vendorLabel(vendor)}
+      />
+    );
+  }
+  return <Sparkle className={className} />;
+}
 
 function Sparkle({ className }: { className?: string }) {
   return (
@@ -60,6 +85,9 @@ export default function SessionReader({
   const [session, setSession] = useState<SessionDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<ReaderMode>(initialMode);
+  // Which reply's sources panel is open, by item index. One at a time: two open
+  // panels in a reading column would just overlap.
+  const [openSources, setOpenSources] = useState<number | null>(null);
 
   useEffect(() => {
     getSession(id)
@@ -171,10 +199,11 @@ export default function SessionReader({
             }
 
             if (item.kind === 'assistant') {
+              const open = openSources === i;
               return (
                 <div className="row row-assistant" key={i}>
                   <span className="mark">
-                    <Sparkle />
+                    <BotMark vendor={session.source} />
                   </span>
                   <div className="msg">
                     <div className="plain">
@@ -182,8 +211,28 @@ export default function SessionReader({
                     </div>
                     <div className="acts">
                       <CopyButton text={item.content} />
-                      <span className="more" aria-hidden="true">···</span>
+                      {item.sources.length ? (
+                        // The `···` was decoration until there was something
+                        // behind it. Now it is the disclosure control for the
+                        // sources, which keeps a long list out of the prose
+                        // while leaving it one click away.
+                        <button
+                          type="button"
+                          className={open ? 'more on' : 'more'}
+                          title={`Sources (${item.sources.length})`}
+                          aria-label={`Sources, ${item.sources.length}`}
+                          aria-expanded={open}
+                          onClick={() => setOpenSources(open ? null : i)}
+                        >
+                          ···
+                        </button>
+                      ) : (
+                        <span className="more idle" aria-hidden="true">···</span>
+                      )}
                     </div>
+                    {open ? (
+                      <SourcesPanel sources={item.sources} onClose={() => setOpenSources(null)} />
+                    ) : null}
                   </div>
                 </div>
               );

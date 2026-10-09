@@ -13,7 +13,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { renderSources } from '../lib/chat.ts';
+import { resolveCitations } from '../lib/chat.ts';
 import type { Source } from '../types/index.ts';
 
 const CITE = '\ue200cite\ue202turn0search0\ue201';
@@ -35,18 +35,22 @@ function cite(overrides: Partial<Source> = {}): Source {
 
 test('an inline citation token becomes a numbered link', () => {
   const text = `The deal was "not imminent."${CITE}`;
-  const out = renderSources(text, [cite({ spans: [[26, 26 + CITE.length]] })]);
+  const out = resolveCitations(text, [cite({ spans: [[26, 26 + CITE.length]] })]);
 
   assert.ok(out.includes('[\\[1\\]](https://example.com/a)'), out);
   assert.ok(!out.includes('\ue200'), 'the token must not survive');
 });
 
-test('the sources list appears at the foot of the reply', () => {
+test('the sources list is NOT appended inline any more', () => {
+  // The list lives behind the reply's `···`. When it was also appended here the
+  // same sources appeared twice, and the prose carried a bibliography nobody
+  // asked for inline.
   const text = `Body.${CITE}`;
-  const out = renderSources(text, [cite({ spans: [[5, 5 + CITE.length]] })]);
+  const out = resolveCitations(text, [cite({ spans: [[5, 5 + CITE.length]] })]);
 
-  assert.ok(out.includes('**Sources**'), out);
-  assert.ok(out.includes('1. [A Source](https://example.com/a) — Example'), out);
+  assert.ok(!out.includes('**Sources**'), out);
+  assert.ok(!out.includes('1. [A Source]'), out);
+  assert.equal(out, 'Body.[\\[1\\]](https://example.com/a)');
 });
 
 test('one source cited several times keeps one number and every marker', () => {
@@ -57,48 +61,53 @@ test('one source cited several times keeps one number and every marker', () => {
     [5, 5 + CITE.length],
     [5 + CITE.length + 10, 5 + CITE.length + 10 + CITE.length],
   ];
-  const out = renderSources(text, [cite({ spans })]);
+  const out = resolveCitations(text, [cite({ spans })]);
 
   assert.equal(out.match(/\[\\\[1\\\]\]\(https:\/\/example\.com\/a\)/g)?.length, 2, out);
-  assert.equal(out.match(/^1\. /gm)?.length, 1, 'the list keeps one entry');
 });
 
 test('a multi-turn citation token is replaced as a whole', () => {
   const text = `Claim.${LONG_CITE}`;
-  const out = renderSources(text, [cite({ spans: [[6, 6 + LONG_CITE.length]] })]);
+  const out = resolveCitations(text, [cite({ spans: [[6, 6 + LONG_CITE.length]] })]);
   assert.ok(out.startsWith('Claim.[\\[1\\]](https://example.com/a)'), out);
   assert.ok(!out.includes('turn0search'), out);
 });
 
 test('a model-written link keeps its own label', () => {
   const text = `See ${URL_REF} for details.`;
-  const out = renderSources(text, [
+  const out = resolveCitations(text, [
     cite({ kind: 'link', title: 'Read the statement', spans: [[4, 4 + URL_REF.length]] }),
   ]);
   assert.ok(out.includes('[Read the statement](https://example.com/a)'), out);
 });
 
-test('a source with no trusted span is still listed', () => {
-  // Bad offsets must not corrupt the text, but the source was still cited.
-  const out = renderSources('No tokens here.', [cite({ spans: [] })]);
-  assert.ok(out.includes('1. [A Source](https://example.com/a)'), out);
-  assert.ok(out.startsWith('No tokens here.'), out);
+test('a source with no trusted span leaves the text alone', () => {
+  // Bad offsets must not corrupt the text. The source is still carried on the
+  // message, so it appears in the panel — it just has no marker to splice.
+  const out = resolveCitations('No tokens here.', [cite({ spans: [] })]);
+  assert.equal(out, 'No tokens here.');
 });
 
 test('overlapping offsets are skipped rather than splicing the wrong text', () => {
   const text = `Body${CITE} tail`;
-  const out = renderSources(text, [
+  const out = resolveCitations(text, [
     cite({ index: 1, spans: [[4, 4 + CITE.length], [6, 20]] }),
   ]);
   assert.ok(out.includes('Body[\\[1\\]](https://example.com/a)'), out);
 });
 
 test('a message with no sources still has its tokens stripped', () => {
-  const out = renderSources(`Body.${CITE}`, []);
+  const out = resolveCitations(`Body.${CITE}`, []);
   assert.equal(out, 'Body.');
 });
 
 test('parentheses in a url do not break the markdown link', () => {
-  const out = renderSources('x', [cite({ url: 'https://en.wikipedia.org/wiki/A_(b)' })]);
+  // Wikipedia URLs are full of them, and an unescaped `)` closes the markdown
+  // link early and dumps the rest into the prose.
+  const text = `See x.${CITE}`;
+  const at = text.indexOf(CITE);
+  const out = resolveCitations(text, [
+    cite({ url: 'https://en.wikipedia.org/wiki/A_(b)', spans: [[at, at + CITE.length]] }),
+  ]);
   assert.ok(out.includes('https://en.wikipedia.org/wiki/A_%28b%29'), out);
 });

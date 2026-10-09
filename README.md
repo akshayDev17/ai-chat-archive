@@ -40,6 +40,10 @@ user turns in a bubble, assistant turns as plain prose, redacted tool calls
 collapsed into a single counted note. The Report/Chat toggle at the top swaps
 between the two views.
 
+Inline `[n]` markers are the conversation's own citations — ChatGPT's source
+pills, restored rather than deleted (see `docs/sources.md`). Each assistant turn
+carries the vendor's mark, and the `···` under it opens that reply's sources.
+
 ![Reading a session — chat view](docs/screenshots/03-reader-chat.png)
 
 ### Signing in
@@ -177,13 +181,17 @@ frontend/
 │       ├── CopyDesk.tsx        # the filing form + your recent filings
 │       ├── StoryLink.tsx       # one story rendered as a link
 │       ├── SessionReader.tsx   # reader with the Report/Chat toggle
+│       ├── SourcesPanel.tsx    # a reply's sources, behind its ···
+│       ├── SourceIcon.tsx      # vendor mark, else a domain monogram
 │       └── AuthFlow.tsx        # email → code → verifying → confirmed
 ├── lib/
 │   ├── api.ts                  # typed API client + ApiError/isSignInRequired
 │   ├── story.ts                # headline / standfirst / citation count
 │   ├── citations.ts            # links [n] markers to the bibliography
-│   ├── chat.ts                 # strips source tokens, groups tool notes
+│   ├── chat.ts                 # resolves citation tokens, groups tool notes
+│   ├── vendors.ts              # vendor lookup + the marks in public/vendors
 │   └── nav.ts                  # AFTER_SIGN_IN + safeNext (redirect guard)
+├── public/vendors/            # chatgpt, gemini, claude marks (+ reserved slot)
 ├── types/index.ts
 ├── package.json
 └── tsconfig.json

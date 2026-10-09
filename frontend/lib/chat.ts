@@ -59,12 +59,16 @@ function markerFor(source: Source): string {
 }
 
 /**
- * Rewrite a message so its citation tokens become real links, and collect the
- * sources into a list at the foot of the reply — which is where ChatGPT puts
- * its own "Sources" panel, and what the `sources_footnote` marker in the
- * payload marks.
+ * Replace a message's citation tokens with real links.
+ *
+ * Only the *markers* are rewritten — the numbered sources themselves are
+ * deliberately not appended here. They used to be, as a `**Sources**` block at
+ * the foot of the reply, which made the same list appear twice once the panel
+ * behind `···` existed, and buried the prose under a bibliography nobody asked
+ * for inline. The list lives in `SourcesPanel`; this function's whole job is to
+ * make the markers in the text click through to it.
  */
-export function renderSources(text: string, sources: Source[]): string {
+export function resolveCitations(text: string, sources: Source[]): string {
   if (!sources.length) return stripTokens(text);
 
   const spans = sources
@@ -84,14 +88,7 @@ export function renderSources(text: string, sources: Source[]): string {
   }
   out += text.slice(cursor);
 
-  const list = sources
-    .map((s) => {
-      const credit = s.attribution ? ` — ${s.attribution}` : '';
-      return `${s.index}. [${markdownLabel(s.title)}](${markdownUrl(s.url)})${credit}`;
-    })
-    .join('\n');
-
-  return `${stripTokens(out)}\n\n**Sources**\n\n${list}`;
+  return stripTokens(out);
 }
 
 /**
@@ -128,7 +125,7 @@ export function splitMention(text: string): { mention: string | null; rest: stri
 
 export type ChatItem =
   | { kind: 'user'; content: string }
-  | { kind: 'assistant'; content: string }
+  | { kind: 'assistant'; content: string; sources: Source[] }
   | { kind: 'system'; content: string }
   | { kind: 'tools'; count: number };
 
@@ -136,12 +133,13 @@ export type ChatItem =
  * Turn the raw message list into render-ready items:
  *  - consecutive redacted tool outputs collapse into one line with a count
  *  - system notices are separated out from real user turns
+ *  - an assistant turn carries its sources, for the panel behind its `···`
  */
 export function toChatItems(messages: Message[]): ChatItem[] {
   const items: ChatItem[] = [];
 
   for (const message of messages) {
-    const content = renderSources(message.content, message.sources ?? []);
+    const content = resolveCitations(message.content, message.sources ?? []);
     if (!content) continue;
 
     if (message.role === 'tool') {
@@ -155,7 +153,7 @@ export function toChatItems(messages: Message[]): ChatItem[] {
     }
 
     if (message.role === 'assistant') {
-      items.push({ kind: 'assistant', content });
+      items.push({ kind: 'assistant', content, sources: message.sources ?? [] });
       continue;
     }
 

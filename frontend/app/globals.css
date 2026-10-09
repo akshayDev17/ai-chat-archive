@@ -905,7 +905,160 @@ body {
 
 .acts button:hover { color: var(--ink); }
 .acts svg { width: 15px; height: 15px; display: block; }
-.acts .more { font-size: 0.8rem; letter-spacing: 0.1em; }
+
+/* The `···` disclosure for a reply's sources. It carries real weight now, so it
+   gets a target big enough to hit and shows when its panel is open. */
+.acts .more {
+  font-size: 0.8rem;
+  letter-spacing: 0.1em;
+  line-height: 1;
+  padding: 0.2rem 0.35rem;
+  border-radius: 4px;
+}
+
+.acts .more:hover { background: var(--card); }
+.acts .more.on { color: var(--accent); background: var(--card); }
+/* No sources behind it: back to being a part of the furniture. */
+.acts .more.idle { cursor: default; opacity: 0.5; padding: 0 0.35rem; }
+
+/* ── the sources panel ─────────────────────────────── */
+.src-panel {
+  margin-top: var(--s3);
+  background: var(--card);
+  border: 1px solid var(--card-line);
+  border-radius: 6px;
+  max-width: 34rem;
+  overflow: hidden;
+}
+
+.src-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: var(--s3) var(--s4);
+  border-bottom: 1px solid var(--card-line);
+}
+
+.src-count {
+  font-variant-numeric: tabular-nums;
+}
+
+.src-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 22rem;
+  overflow-y: auto;
+}
+
+.src-list li + li { border-top: 1px solid var(--card-line); }
+
+.src-list a {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s3);
+  padding: var(--s3) var(--s4);
+  text-decoration: none;
+  color: inherit;
+}
+
+.src-list a:hover { background: var(--paper); }
+.src-list a:hover .src-title { color: var(--accent); }
+
+.src-body { min-width: 0; flex: 1; }
+
+/* The site's name first, the way a masthead precedes a headline — it is what
+   tells a reader who is speaking, and it is what they scan for. */
+.src-domain {
+  display: block;
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 0.15rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.src-date { text-transform: none; letter-spacing: 0; }
+
+.src-title {
+  display: block;
+  font-family: var(--serif);
+  font-size: 0.95rem;
+  line-height: 1.3;
+  color: var(--ink);
+  transition: color 0.12s ease;
+}
+
+.src-num {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  margin-top: 0.15rem;
+}
+
+/* ── source and vendor marks ───────────────────────── */
+/* Rendered as a mask so one single-path SVG takes currentColor: the same file
+   works on paper, on ink and on the accent. */
+.src-icon {
+  flex: none;
+  display: block;
+  border-radius: 3px;
+  margin-top: 1px;
+}
+
+.src-icon-vendor {
+  background-color: var(--ink);
+  mask-repeat: no-repeat;
+  mask-position: center;
+  mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  -webkit-mask-size: contain;
+}
+
+/* A site with no mark of its own: its initial on a tint fixed by the domain, so
+   the same site always looks the same and the list does not read as noise. */
+.src-icon-mono {
+  display: grid;
+  place-items: center;
+  font-family: var(--mono);
+  font-weight: 600;
+  line-height: 1;
+  color: var(--paper);
+  background: var(--tint, var(--muted));
+}
+
+.src-icon-mono[data-tint='0'] { --tint: #3A4BD8; }
+.src-icon-mono[data-tint='1'] { --tint: #1F6F5C; }
+.src-icon-mono[data-tint='2'] { --tint: #8A3B5C; }
+.src-icon-mono[data-tint='3'] { --tint: #8A5A00; }
+.src-icon-mono[data-tint='4'] { --tint: #35507A; }
+.src-icon-mono[data-tint='5'] { --tint: #5A4A8A; }
+
+/* The vendor's mark inside the assistant's roundel. */
+.bot-mark {
+  display: block;
+  width: 13px;
+  height: 13px;
+  background-color: currentColor;
+  mask-repeat: no-repeat;
+  mask-position: center;
+  mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  -webkit-mask-size: contain;
+}
 
 .toolnote {
   font-family: var(--mono);
