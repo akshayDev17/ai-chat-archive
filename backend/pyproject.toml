@@ -5,7 +5,15 @@ description = "Python backend that ingests ChatGPT share links into Cloudflare D
 requires-python = ">=3.11"
 
 [project.optional-dependencies]
+# The tests are stdlib `unittest` and run directly:
+#   python3 backend/test/test_ownership.py
+# pytest is optional, and only there so a CI job can run the whole directory in
+# one command instead of four.
 dev = ["pytest>=8"]
 
 [tool.pytest.ini_options]
-pythonpath = ["src"]
+# `"."` — the backend root, which is what makes `import chat_archive` resolve.
+# This said `["src"]` from before the package was renamed, so pytest would have
+# failed on the first import; nothing noticed because nothing ran pytest.
+pythonpath = ["."]
+testpaths = ["test"]
