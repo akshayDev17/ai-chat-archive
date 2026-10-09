@@ -261,7 +261,7 @@ class TestD1Repository(OwnershipContract, unittest.TestCase):
     """Runs the D1 repository's real SQL against a SQLite-backed fake binding."""
 
     def make_repository(self):
-        self._d1 = FakeD1(BACKEND / "schema.sql")
+        self._d1 = FakeD1(BACKEND / "migrations" / "0001_init.sql")
         return D1ConversationRepository(self._d1)
 
 

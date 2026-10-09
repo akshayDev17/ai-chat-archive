@@ -1,5 +1,19 @@
--- D1 schema. Apply with:
---   npx wrangler d1 execute ai-chat-archive --remote --file=schema.sql
+-- 0001_init — the whole schema, as it stood when the project was first deployed.
+--
+-- Apply with:
+--   npx wrangler d1 migrations apply ai-chat-archive --remote
+--
+-- This replaced a bare `schema.sql` run through `d1 execute`. That worked once
+-- and gave nothing afterwards: no record of what had been applied, no rollback,
+-- and no way to tell a database that had the schema from one that did not.
+-- `d1 migrations` keeps what it applied in a `d1_migrations` table, takes a
+-- backup before applying, rolls the failed migration back while leaving earlier
+-- ones in place, and skips the confirmation prompt in CI.
+-- https://developers.cloudflare.com/d1/reference/migrations/
+--
+-- Every later change is a new numbered file here. Never edit this one: a
+-- database somewhere has already run it, and editing it would make that database
+-- and a fresh one disagree with nothing to show for it.
 --
 -- Provenance model
 -- ----------------

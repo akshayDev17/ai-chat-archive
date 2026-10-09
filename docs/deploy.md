@@ -1,0 +1,278 @@
+# Deploying
+
+Nothing is deployed yet. `backend/wrangler.jsonc` still carries
+`database_id: "REPLACE_WITH_YOUR_D1_DATABASE_ID"`, which is the honest marker of
+that.
+
+Read §1 first: it decides the shape of everything after it.
+
+---
+
+## 1. How many Workers, and on how many domains
+
+**A Worker runs one runtime.** The API is Python (`compatibility_flags:
+["python_workers"]`). Next.js, whenever it does any server rendering, produces a
+*JavaScript* Worker. Those cannot be the same Worker, so the question is really
+"does the frontend need a server at all?".
+
+| | one domain, two Workers | one domain, one Worker | two domains |
+|---|---|---|---|
+| frontend | Next.js via OpenNext on `/*` | static export served by the Python Worker | either |
+| API | Python Worker on `/api/*` | the same Worker | `api.` subdomain |
+| CORS | none (same origin) | none | **required** |
+| sign-in | one cookie | one cookie | **a second login** |
+| deploys | two | one | two |
+
+**One domain.** `CF_Authorization` is set per hostname, and the docs are explicit:
+"Users who log in to `example.com` will be issued a cookie for `example.com`. When
+the user's browser requests `api.mysite.com`, Cloudflare Access looks for a cookie
+specific to `api.mysite.com`."
+— <https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/>
+
+Splitting the API onto a subdomain would mean a second sign-in for every reader,
+and CORS on every request, in exchange for tidiness nobody can see.
+
+Routing both from one hostname is ordinary: routes are matched by pattern and
+"the most specific route pattern wins", so `/api/*` beats `/*`.
+— <https://developers.cloudflare.com/workers/configuration/routing/routes/>
+
+> **Use Routes, not a Custom Domain, for this.** "Unlike Routes, Custom Domains
+> point all paths of a domain or subdomain to your Worker." A Custom Domain on the
+> API Worker would swallow the frontend.
+
+### Which frontend option
+
+**Two Workers** (OpenNext) keeps `/chat-archives/<share-id>` working exactly as it
+does today, because a server can render any path. It costs a second deploy and a
+JavaScript runtime sitting in front of every asset.
+
+**One Worker** requires the frontend to be a *static export* — no server
+rendering at all — and then Workers Static Assets serves the files and only hands
+`/api/*` to the Python script:
+
+```jsonc
+"assets": {
+  "directory": "../frontend/out",
+  "not_found_handling": "single-page-application",
+  "run_worker_first": ["/api/*"]
+}
+```
+
+"In this configuration, requests to `/api/*` routes will invoke the Worker script
+first."
+— <https://developers.cloudflare.com/workers/static-assets/binding/>
+
+That is genuinely attractive here, because **this frontend fetches everything
+from the API in the browser** — no SSR data fetching, no server actions, no
+middleware. But it is blocked by one thing:
+
+> `output: 'export'` cannot emit `/chat-archives/<share-id>`, because the set of
+> share ids is unbounded. Next needs `generateStaticParams`, and we cannot
+> enumerate every id that will ever exist.
+
+So the single-Worker option needs the reader's URL to change shape — e.g.
+`/chat-archives/story?id=<share-id>`, which is statically emittable. That is a
+product decision, not a technical one, and it is the whole of the tradeoff.
+
+**Current recommendation: two Workers, OpenNext.** Keep the URL, accept the
+second deploy. Revisit if the frontend ever becomes a true static export.
+
+> Cloudflare recommends **vinext** over OpenNext for Next.js on Workers, but
+> vinext "Targets Next.js 16.x" and this app is on **15.5.27**. The docs route
+> existing apps to OpenNext: "Use this guide to maintain an existing OpenNext
+> application. Migrate to vinext when compatibility allows."
+> — <https://developers.cloudflare.com/workers/framework-guides/web-apps/nextjs/>
+
+---
+
+## 2. Data: D1
+
+### Create it once
+
+```bash
+cd backend
+npx wrangler d1 create ai-chat-archive --location apac
+```
+
+Say **Yes** to the prompt that offers to write the binding into
+`wrangler.jsonc`, or copy the `database_id` in by hand.
+
+`--location` is a performance hint, not a promise: "Providing a location hint
+does not guarantee that D1 runs in your preferred location." A **jurisdiction**
+(`--jurisdiction eu|fedramp|us`) is a data-residency commitment, and unlike the
+hint it is permanent: "Jurisdictions can only be set on database creation and
+cannot be added or updated after the database exists."
+— <https://developers.cloudflare.com/d1/configuration/data-location/>
+
+### Apply the schema
+
+```bash
+npx wrangler d1 migrations apply ai-chat-archive --remote
+npx wrangler d1 migrations apply ai-chat-archive --local   # for `wrangler dev`
+```
+
+`0001_init.sql` is the whole schema. Every later change is a new numbered file —
+**never edit an applied one**, or a database that ran it and a fresh one will
+disagree with nothing to show for it.
+
+Why migrations rather than `d1 execute --file=schema.sql`: the runner records
+what it applied in a `d1_migrations` table, takes a backup first, and "If applying
+a migration results in an error, this migration will be rolled back, and the
+previous successful migration will remain applied." In CI it also "skips the
+confirmation step".
+— <https://developers.cloudflare.com/d1/reference/migrations/>
+
+### What the free plan gives
+
+| | free |
+|---|---|
+| databases | 10 |
+| max size per database | **500 MB** |
+| rows read | **5,000,000 / day** |
+| rows written | **100,000 / day** |
+| Time Travel (restore window) | 7 days |
+| queries per Worker invocation | 50 |
+
+— <https://developers.cloudflare.com/d1/platform/limits/> and
+<https://developers.cloudflare.com/d1/platform/pricing/>
+
+Sizing, roughly: a 24-message session with 15 sources writes on the order of 40
+rows. So the write ceiling is about **2,400 ingestions a day**, and a front-page
+load reads one row per conversation plus one per report. Neither is close.
+
+Two limits worth knowing before they bite:
+- **Rows written per day.** `upsert` deletes and re-inserts a conversation's
+  messages and sources on every re-file, so re-filing the same link costs the
+  same as filing it fresh.
+- **50 queries per invocation.** `list_all` is one query; `get` is four
+  (conversation, messages, report, sources). Fine, but a "load everything"
+  endpoint would not be.
+
+### Backup
+
+```bash
+npx wrangler d1 export ai-chat-archive --remote --output=./backup-$(date +%F).sql
+```
+
+Caveats from the docs: "A running export will block other database requests",
+and "Export is not supported for virtual tables" — which is why FTS5 is deferred
+in `plan.md`. Free-plan Time Travel keeps only 7 days, so this is the durable
+copy, and it belongs on the external drive.
+— <https://developers.cloudflare.com/d1/best-practices/import-export-data/>
+
+---
+
+## 3. Data: R2 — not yet
+
+**Nothing in the codebase reads or writes R2.** It is in `plan.md` and unwired,
+and creating it now would be a bucket nothing touches and — on the free plan — a
+checkout flow to complete.
+
+Its first real use is already identified: **favicons, fetched once at ingest and
+stored**, instead of asking a third party for them on every page load (see
+`docs/sources.md`). Provision it when that work starts.
+
+When it does:
+
+```bash
+npx wrangler r2 bucket create ai-chat-archive-media
+```
+
+```jsonc
+"r2_buckets": [{ "binding": "MEDIA", "bucket_name": "ai-chat-archive-media" }]
+```
+
+Free tier: 10 GB-month storage, 1 million Class A operations, 10 million Class B,
+and **egress is free** — "Egressing directly from R2, including via the Workers
+API, S3 API, and r2.dev domains does not incur data transfer (egress) charges."
+Bucket names must be lowercase, 3–63 characters, and "buckets are not public by
+default".
+— <https://developers.cloudflare.com/r2/pricing/>
+
+---
+
+## 4. Deploying the API Worker
+
+```bash
+cd backend
+uv run pywrangler deploy
+```
+
+Python Workers deploy through `pywrangler`, which wraps Wrangler; `uv` is already
+on this machine.
+— <https://developers.cloudflare.com/workers/languages/python/>
+
+Then confirm the identity wiring actually arrived:
+
+```bash
+curl https://akshayprabhakant.com/api/health
+```
+
+It should report `"context_available": true`. `ctx.access` is documented for
+JavaScript only, so this endpoint exists to let the deployed Worker answer the
+question rather than have us assume it — without it, a missing `self.ctx` fails
+closed and every protected route 401s with no explanation.
+
+---
+
+## 5. CI/CD
+
+**GitHub Actions, not Workers Builds.** Workers Builds expects one Worker per
+connected repository and root directory, and this repo has two deployables.
+More importantly, neither Workers Builds nor `cloudflare/wrangler-action`
+documents Python Worker support, and `uv` — which `pywrangler` needs — does not
+appear in the Workers Builds build-image tooling table. A plain GitHub Actions
+step runs the command we know works.
+
+Two secrets, from **Account API tokens → Create Token → Edit Cloudflare Workers**:
+
+- `CLOUDFLARE_ACCOUNT_ID`
+- `CLOUDFLARE_API_TOKEN`
+
+> **Add `D1 Edit` to the token by hand.** The Edit Cloudflare Workers template
+> grants Workers Routes, Workers Scripts, KV, R2 and account settings — and **no
+> D1 permission at all**. The token Workers Builds generates for you is missing
+> D1 too. Miscoping means a deploy that succeeds and a migration that quietly
+> cannot run.
+> — <https://developers.cloudflare.com/fundamentals/api/reference/template/>
+
+The docs on storing it: "Don't store the value of `CLOUDFLARE_API_TOKEN` in your
+repository, as it gives access to deploy Workers on your account."
+— <https://developers.cloudflare.com/workers/ci-cd/external-cicd/github-actions/>
+
+Recommended shape, once the frontend topology is settled:
+
+1. **test** — `pytest` over `backend/`, `npm run test:lib`, `tsc --noEmit`,
+   `npm run build:check`. All four run offline and take seconds.
+2. **deploy-api** — `d1 migrations apply --remote`, then `pywrangler deploy`.
+3. **deploy-web** — only if OpenNext is chosen.
+
+---
+
+## 6. Secrets and local development
+
+Worker secrets: `npx wrangler secret put <KEY>`. Note that it "creates a new
+version of the Worker and deploys it immediately".
+
+Local values go in `.dev.vars` or `.env` next to the Wrangler config — "Choose to
+use either `.dev.vars` or `.env` but not both" — and **neither is committed**:
+"The `.dev.vars` and `.env` files should not be committed to git." Both patterns
+are already in `.gitignore`.
+— <https://developers.cloudflare.com/workers/configuration/secrets/>
+
+---
+
+## 7. Order of operations
+
+1. Zone: `akshayprabhakant.com` on Cloudflare, with a proxied DNS record.
+2. `wrangler d1 create --location apac` → id into `wrangler.jsonc`.
+3. `wrangler d1 migrations apply ai-chat-archive --remote`.
+4. `uv run pywrangler deploy` → `curl /api/health` and check
+   `context_available: true`.
+5. File one session through `/chat-archives/desk` and read it back.
+6. Frontend topology decision (§1), then deploy it.
+7. `wrangler d1 export` to the external drive, and put it on a schedule.
+8. Only then, CI/CD.
+
+Do 4 and 5 by hand before wiring a pipeline. A pipeline that deploys something
+nobody has run once is a faster way to be confused.

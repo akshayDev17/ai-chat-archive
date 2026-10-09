@@ -143,7 +143,7 @@ backend/
 ├── test/test_decode.py     # network test: decode + parse a real share link
 ├── test/test_ownership.py  # offline contract test: all 3 repositories agree
 ├── test/test_urls.py       # offline: the open-redirect guard
-├── schema.sql              # D1 schema
+├── migrations/             # D1 migrations (0001_init.sql is the schema)
 ├── wrangler.jsonc          # Worker + D1 binding config
 └── pyproject.toml
 ```
@@ -263,17 +263,22 @@ identities is exactly what must never ship.
 
 ## Deploy
 
-1. `cd backend && npx wrangler d1 create ai-chat-archive` → copy the id into
-   `wrangler.jsonc`.
-2. `npx wrangler d1 execute ai-chat-archive --remote --file=schema.sql`.
-3. `npx wrangler deploy`.
-4. Verify the identity wiring actually reached the origin —
-   `curl https://akshayprabhakant.com/api/health` should report
-   `"context_available": true`. `ctx.access` is documented for JavaScript;
-   `/api/health` is how the deployed Python Worker proves or disproves that it
-   exists, instead of every request 403ing with no explanation.
-5. Cloudflare Access is then an **optional outer lock**, not the authority: it
-   matches hostname/path only, so it cannot express the public-read table above.
-   Keep `"workers_dev": false` so the Worker is reachable only through the
-   custom domain.
+Nothing is deployed yet. **`docs/deploy.md` is the full guide** — it opens with
+the one decision that shapes the rest (one Worker or two, one domain or two) and
+carries the citations for every claim.
+
+The short version:
+
+1. `cd backend && npx wrangler d1 create ai-chat-archive --location apac` → the
+   id lands in `wrangler.jsonc`. A location hint is a hint; a jurisdiction is
+   permanent and set at creation only.
+2. `npx wrangler d1 migrations apply ai-chat-archive --remote`.
+3. `uv run pywrangler deploy`.
+4. `curl https://akshayprabhakant.com/api/health` must report
+   `"context_available": true`. `ctx.access` is documented for JavaScript only,
+   so `/api/health` is how the deployed Python Worker proves or disproves it
+   exists — instead of failing closed and 401ing everything with no explanation.
+5. Keep `"workers_dev": false`, and reach the API through a **Route** rather than
+   a Custom Domain: a Custom Domain "point[s] all paths of a domain or subdomain
+   to your Worker", which would swallow the frontend.
 
