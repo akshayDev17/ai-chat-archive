@@ -1,11 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ingestSession, isSignInRequired, listFilings, whoami } from '@/lib/api';
+import { ingestSession, isSignInRequired, whoami } from '@/lib/api';
 import { AFTER_SIGN_IN } from '@/lib/nav';
-import type { Session } from '@/types';
-import StoryLink from './StoryLink';
 
 /**
  * The copy desk: where a share link becomes a story in the paper.
@@ -15,25 +13,19 @@ import StoryLink from './StoryLink';
  * page is public while this is not.
  *
  * The page enforces its own gate rather than relying on the router, because
- * the gate is a *server* fact: `GET /api/filings` answers 401 to anyone without
+ * the gate is a *server* fact: `POST /api/ingest` answers 401 to anyone without
  * an identity. Bouncing to the sign-in screen (with `next` pointing back here)
  * is the friendly rendering of that same fact, not a substitute for it.
+ *
+ * One job, one page: the form. There was briefly a "your recent filings" list
+ * underneath, which made a single-purpose page into a dashboard — the filed
+ * story is already in the edition, one click away on the front page, and
+ * `archive:updated` refreshes it.
  */
 export default function CopyDesk() {
   const router = useRouter();
   const [email, setEmail] = useState<string | null>(null);
   const [checking, setChecking] = useState(true);
-  const [filings, setFilings] = useState<Session[]>([]);
-
-  const loadFilings = useCallback(async () => {
-    try {
-      setFilings(await listFilings());
-    } catch {
-      // A failed filings read must not hide the form — filing is the point of
-      // the page, and the form reports its own errors.
-      setFilings([]);
-    }
-  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -46,7 +38,6 @@ export default function CopyDesk() {
         }
         setEmail(value);
         setChecking(false);
-        void loadFilings();
       })
       .catch(() => {
         if (!cancelled) {
@@ -56,7 +47,7 @@ export default function CopyDesk() {
     return () => {
       cancelled = true;
     };
-  }, [router, loadFilings]);
+  }, [router]);
 
   if (checking) return <p className="fine">Opening the copy desk…</p>;
 
@@ -73,26 +64,13 @@ export default function CopyDesk() {
         </p>
       </section>
 
-      <FileSession onFiled={loadFilings} />
-
-      {filings.length > 0 ? (
-        <section className="desk-filings">
-          <h2 className="desk-sub">Your recent filings</h2>
-          <ul>
-            {filings.map((session) => (
-              <li key={session.id}>
-                <StoryLink session={session} variant="flow" />
-              </li>
-            ))}
-          </ul>
-        </section>
-      ) : null}
+      <FileSession />
     </div>
   );
 }
 
 /** The filing form itself: one field, one button, one honest status line. */
-function FileSession({ onFiled }: { onFiled: () => void }) {
+function FileSession() {
   const [url, setUrl] = useState('');
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<{ text: string; error: boolean } | null>(null);
@@ -108,7 +86,8 @@ function FileSession({ onFiled }: { onFiled: () => void }) {
         error: false,
       });
       setUrl('');
-      onFiled();
+      // Tells the front page (another tab included) to re-read the edition.
+      window.dispatchEvent(new Event('archive:updated'));
     } catch (error) {
       if (isSignInRequired(error)) {
         // The session expired between opening the desk and filing. Access
@@ -126,6 +105,10 @@ function FileSession({ onFiled }: { onFiled: () => void }) {
     }
   }
 
+  // Both states render the SAME element with the same class. They used to
+  // differ — the hint took `.fine` (no top margin) and the result took
+  // `.file-msg` — which both left the hint flush against the input's bottom
+  // border and made the spacing jump the moment you filed something.
   return (
     <form className="file-form" onSubmit={submit}>
       <label htmlFor="share-url">ChatGPT share link</label>
@@ -143,13 +126,15 @@ function FileSession({ onFiled }: { onFiled: () => void }) {
           {busy ? 'Filing…' : 'File it'}
         </button>
       </div>
-      {note ? (
-        <p className={note.error ? 'file-msg error' : 'file-msg'}>{note.text}</p>
-      ) : (
-        <p className="fine">
-          In the ChatGPT share dialog, choose <em>Share link</em> and paste it here.
-        </p>
-      )}
+      <p className={note?.error ? 'file-msg error' : 'file-msg'} role="status">
+        {note ? (
+          note.text
+        ) : (
+          <>
+            In the ChatGPT share dialog, choose <em>Share link</em> and paste it here.
+          </>
+        )}
+      </p>
     </form>
   );
 }

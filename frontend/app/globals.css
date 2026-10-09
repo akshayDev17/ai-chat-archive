@@ -218,30 +218,20 @@ body {
   font-family: var(--mono);
   font-size: 0.6875rem;
   line-height: 1.5;
-  margin-top: var(--s3);
+  /* One rule for both the helper hint and the result message, because they are
+     the same slot. Sized to clear the input's bottom border rather than sit on
+     it, and fixed so the spacing does not jump when a message replaces it. */
+  margin-top: var(--s4);
   color: var(--muted);
+}
+
+.file-msg em {
+  font-style: italic;
+  color: var(--ink);
 }
 
 .file-msg.error {
   color: #b00020;
-}
-
-.desk-sub {
-  font-family: var(--mono);
-  font-size: 0.6875rem;
-  font-weight: 400;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--muted);
-  border-bottom: 1px solid var(--rule);
-  padding-bottom: var(--s2);
-  margin-bottom: var(--s4);
-}
-
-.desk-filings ul {
-  list-style: none;
-  padding: 0;
-  margin: 0;
 }
 
 /* ── typographic primitives ────────────────────────── */

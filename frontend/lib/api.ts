@@ -52,15 +52,10 @@ export async function whoami(): Promise<string | null> {
  * The public edition — every filed story, from every filer.
  *
  * No identity required: the front page is a newspaper, so it reads the same for
- * everyone. Ownership is provenance (the credit line), not a filter.
+ * everyone. Ownership is provenance (internal), not a filter.
  */
 export function listSessions(): Promise<Session[]> {
   return request<SessionListResponse>('/api/sessions').then((d) => d.sessions);
-}
-
-/** What *you* filed. 401s when signed out — this is the copy desk's own read. */
-export function listFilings(): Promise<Session[]> {
-  return request<SessionListResponse>('/api/filings').then((d) => d.sessions);
 }
 
 /** A single story, public by permalink: no sign-in required. */
