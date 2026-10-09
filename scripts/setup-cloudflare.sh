@@ -342,6 +342,7 @@ stage "Create the D1 database"
   fi
 
   if [[ "${existing:-}" == "REPLACE_WITH_YOUR_D1_DATABASE_ID" || -z "${existing:-}" ]]; then
+    ensure_token
     say "Creating '$D1_NAME' with a location hint of apac."
     note "A hint, not a promise: it does not guarantee the database runs there."
     note "A jurisdiction (eu/us/fedramp) would be permanent and set only at"
@@ -371,6 +372,7 @@ stage "Create the D1 database"
 # ── stage 4: Apply the schema ────────────────────────────────────────────
 stage_4() {
 stage "Apply the schema"
+  ensure_token
   say "Migrations, not a bare schema file: the runner records what it applied in"
   say "a d1_migrations table, backs up first, and rolls a failed one back."
   say ""
@@ -397,6 +399,7 @@ stage "Apply the schema"
 # ── stage 5: Deploy the API Worker ───────────────────────────────────────
 stage_5() {
 stage "Deploy the API Worker"
+  ensure_token
   say "Python Workers deploy through pywrangler, which wraps wrangler."
   _have uv || { warn "uv is not installed, and pywrangler needs it."; note "Install: curl -LsSf https://astral.sh/uv/install.sh | sh"; exit 1; }
 
@@ -504,6 +507,52 @@ stage "File one session, end to end"
     warn "faster is not an improvement."
   fi
 
+}
+
+# ── credentials, for stages reached by --from ──────────────────────────────
+#
+# Stage 2 is where the token is captured, and `--from 5` skips stage 2. With
+# `set -u` that surfaced as "CLOUDFLARE_API_TOKEN: unbound variable" — an error
+# about a shell variable, for a user who simply resumed where they left off.
+#
+# The token is deliberately not written to disk: a credential in a file is a
+# credential in a backup, a screenshot and a shell history, and only these
+# stages need it. So a resumed run asks for it, once, and says why.
+ensure_token() {
+  if [[ -n "${CLOUDFLARE_API_TOKEN:-}" ]]; then
+    return 0
+  fi
+
+  # The account id IS kept in .env — it is an identifier, not a credential,
+  # and it saves a trip to the dashboard.
+  if [[ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]]; then
+    CLOUDFLARE_ACCOUNT_ID=$(_existing CLOUDFLARE_ACCOUNT_ID || true)
+  fi
+
+  say "This stage talks to Cloudflare, so it needs the API token."
+  note "It is not kept on disk on purpose, so a resumed run asks for it again."
+  ask_secret CLOUDFLARE_API_TOKEN "Paste the token:"
+  if [[ -z "${CLOUDFLARE_API_TOKEN:-}" ]]; then
+    warn "No token, so there is nothing to deploy with."
+    exit 1
+  fi
+
+  if [[ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]]; then
+    CLOUDFLARE_ACCOUNT_ID=$(cf_api "/accounts" | _json 'd["result"][0]["id"]') || true
+  fi
+  if [[ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]]; then
+    warn "Could not determine the account id from this token."
+    exit 1
+  fi
+
+  # Same check stage 2 makes, for the same reason: a token without D1 Edit
+  # deploys fine and leaves the migration unable to run.
+  if ! cf_api "/accounts/${CLOUDFLARE_ACCOUNT_ID}/d1/database" >/dev/null 2>&1; then
+    warn "This token cannot reach D1."
+    note "Add 'Account · D1 · Edit' to it, or paste a different token."
+    exit 1
+  fi
+  printf '  %s✓%s token verified, account %s\n' "$GREEN" "$RESET" "$CLOUDFLARE_ACCOUNT_ID"
 }
 
 # ── run ───────────────────────────────────────────────────────────────────
