@@ -215,6 +215,46 @@ closed and every protected route 401s with no explanation.
 
 ---
 
+## 4b. Running the real Worker locally — the sandbox
+
+**`pywrangler dev` boots `entry.py` in the real workerd runtime against a local
+D1, with no Cloudflare account and no credentials.** This is the thing to reach
+for before deploying, and it is the only test that exercises the Worker as
+deployed:
+
+```bash
+cd backend
+uv sync                                              # installs pywrangler
+npx wrangler d1 migrations apply ai-chat-archive --local
+uv run pywrangler dev --port 8788
+curl http://127.0.0.1:8788/api/health
+```
+
+`backend/local_server.py` is **not** this. It is a parallel implementation that
+shares the service, parser and repositories but has its own HTTP handler and a
+urllib fetcher. Anything specific to the Worker — the FFI, `js.fetch`, `ctx`,
+D1's real API, whether the entrypoint even imports — is invisible to it.
+
+That gap is not theoretical. The first time this Worker was ever booted it
+failed three times in a row, on three things `local_server.py` cannot see:
+
+1. **`ModuleNotFoundError: No module named 'workers'`** — plain `wrangler dev`
+   does not wire the Python SDK in; `pywrangler` does.
+2. **`ImportError: attempted relative import with no known parent package`** —
+   `main` pointed at `chat_archive/entry.py`, so wrangler treated
+   `chat_archive/` as the module root and flattened it, leaving `entry.py` with
+   no parent package. Hence `backend/entry.py`, a two-line shim, so the root is
+   `backend/` and `chat_archive/` is attached as a package.
+3. **`TypeError: Incorrect type: the provided value is not of type 'Sequence'`
+   and a dead isolate** — `HttpShareFetcher` called `js.fetch` with Python
+   keyword arguments and a Python dict. JS has no keyword arguments, and its
+   `init` must be a real JS object; passing one kills the isolate rather than
+   raising. `worker_fetch` in `entry.py` now does the `to_js` conversion at the
+   one place that knows it is talking to JavaScript.
+
+Two of those would have failed identically in production. The third crashed the
+runtime.
+
 ## 5. CI/CD
 
 **GitHub Actions, not Workers Builds.** Workers Builds expects one Worker per

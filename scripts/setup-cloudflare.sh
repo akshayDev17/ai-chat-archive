@@ -244,225 +244,311 @@ PY
 
 # ── stages ────────────────────────────────────────────────────────────────
 
-banner "Deploy the AI Chat Archive to Cloudflare"
 
 # ── 1 ─────────────────────────────────────────────────────────────────────
+# ── stage 1: The zone exists on Cloudflare ───────────────────────────────
+stage_1() {
 stage "The zone exists on Cloudflare"
-say "Everything below hangs off $DOMAIN being an active zone in your account."
-open_url "https://dash.cloudflare.com/"
-step "Select the $DOMAIN zone."
-step "Check the Overview panel says the zone is Active."
-step "Then DNS → Records: the apex should have a proxied (orange cloud) record."
-note "If the zone is not here, add the site and change the nameservers at your"
-note "registrar first. Routes attach to a zone, so nothing else can work until"
-note "this one does."
-if ! confirm "Is $DOMAIN an active zone in your account?"; then
-  warn "Stop here and get the zone active, then re-run this wizard."
-  exit 1
-fi
-
-# ── 2 ─────────────────────────────────────────────────────────────────────
-stage "API token — with D1 added by hand"
-say "The Edit Cloudflare Workers template does NOT include D1. That omission is"
-say "the whole reason this stage exists: without it a deploy succeeds and the"
-say "migration silently cannot run."
-open_url "https://dash.cloudflare.com/profile/api-tokens"
-step "Create Token → 'Edit Cloudflare Workers' → Use template."
-step "Account Resources: include your account."
-step "Zone Resources: include $DOMAIN."
-step "Still in Permissions, press '+ Add more' and add:  Account · D1 · Edit"
-step "Continue to summary → Create Token → copy it."
-ask_secret CLOUDFLARE_API_TOKEN "Paste the token:"
-
-if [[ -z "${CLOUDFLARE_API_TOKEN:-}" ]]; then
-  warn "No token given, so there is nothing to verify. Re-run when you have one."
-  exit 1
-fi
-
-say ""
-say "Checking the token actually carries D1, rather than assuming it..."
-if ! accounts=$(cf_api "/accounts"); then
-  warn "The Cloudflare API rejected this token outright."
-  note "Usually a bad paste, or the token was created for a different account."
-  exit 1
-fi
-printf '  %s✓%s token is valid\n' "$GREEN" "$RESET"
-
-# The account id is right there in the response, so do not make anyone copy it.
-CLOUDFLARE_ACCOUNT_ID=$(printf '%s' "$accounts" | _json 'd["result"][0]["id"]')
-N_ACCOUNTS=$(printf '%s' "$accounts" | _json 'len(d["result"])')
-if [[ "$N_ACCOUNTS" != "1" ]]; then
-  warn "This token can see $N_ACCOUNTS accounts; we assume the first."
-  printf '%s' "$accounts" | python3 -c '
-import json, sys
-for a in json.load(sys.stdin)["result"]:
-    print("    -", a["id"], a["name"])
-' || true
-  note "If that is wrong, edit CLOUDFLARE_ACCOUNT_ID in .env and re-run."
-fi
-say "  account id: $CLOUDFLARE_ACCOUNT_ID   (read off the token, not typed)"
-
-if cf_api "/accounts/${CLOUDFLARE_ACCOUNT_ID}/d1/database" >/dev/null; then
-  printf '  %s✓%s token can reach D1\n' "$GREEN" "$RESET"
-else
-  warn "This token CANNOT reach D1 — the exact problem this stage guards against."
-  note "Go back to the token's Permissions and add:  Account · D1 · Edit"
-  note "Editing a token's permissions does not always reissue it; if in doubt,"
-  note "create a fresh token and paste that."
-  exit 1
-fi
-
-set_secret CLOUDFLARE_API_TOKEN "$CLOUDFLARE_API_TOKEN"
-set_secret CLOUDFLARE_ACCOUNT_ID "$CLOUDFLARE_ACCOUNT_ID"
-# The account id is not a credential, so it is also kept locally where the
-# wrangler commands below can pick it up. The token deliberately is not: it
-# belongs in CI, and a second copy on disk is a liability with no upside.
-write_env CLOUDFLARE_ACCOUNT_ID "$CLOUDFLARE_ACCOUNT_ID"
-
-# ── 3 ─────────────────────────────────────────────────────────────────────
-stage "Create the D1 database"
-existing=$(grep -oE '"database_id"\s*:\s*"[^"]*"' "$WRANGLER_CONFIG" | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
-if [[ "$existing" != "REPLACE_WITH_YOUR_D1_DATABASE_ID" && -n "$existing" ]]; then
-  say "$WRANGLER_CONFIG already names a database:"
-  note "  $existing"
-  if confirm "Keep it and skip creation?"; then
-    note "keeping the existing database id"
-  else
-    existing=""
-  fi
-fi
-
-if [[ "${existing:-}" == "REPLACE_WITH_YOUR_D1_DATABASE_ID" || -z "${existing:-}" ]]; then
-  say "Creating '$D1_NAME' with a location hint of apac."
-  note "A hint, not a promise: it does not guarantee the database runs there."
-  note "A jurisdiction (eu/us/fedramp) would be permanent and set only at"
-  note "creation — this project stores nothing that requires one."
-  if ! out=$(wrun d1 create "$D1_NAME" --location apac 2>&1); then
-    warn "d1 create failed:"
-    printf '%s\n' "$out" | sed 's/^/    /'
-    note "If it mentions authentication, the token is missing D1 Edit (stage 2)."
+  say "Everything below hangs off $DOMAIN being an active zone in your account."
+  open_url "https://dash.cloudflare.com/"
+  step "Select the $DOMAIN zone."
+  step "Check the Overview panel says the zone is Active."
+  step "Then DNS → Records: the apex should have a proxied (orange cloud) record."
+  note "If the zone is not here, add the site and change the nameservers at your"
+  note "registrar first. Routes attach to a zone, so nothing else can work until"
+  note "this one does."
+  if ! confirm "Is $DOMAIN an active zone in your account?"; then
+    warn "Stop here and get the zone active, then re-run this wizard."
     exit 1
   fi
-  printf '%s\n' "$out" | grep -E 'database_id|"uuid"' | sed 's/^/    /' || true
-  D1_ID=$(printf '%s' "$out" | grep -oE '"database_id"\s*:\s*"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
-  if [[ -z "${D1_ID:-}" ]]; then
-    D1_ID=$(wrun d1 list --json 2>/dev/null | python3 -c \
-      "import json,sys;print(next((d['uuid'] for d in json.load(sys.stdin) if d.get('name')=='$D1_NAME'),''))" 2>/dev/null || true)
-  fi
-  if [[ -z "${D1_ID:-}" ]]; then
-    D1_ID=$(wrun d1 list 2>/dev/null | grep -E "\b$D1_NAME\b" | grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -1 || true)
-  fi
-  [[ -n "${D1_ID:-}" ]] || { warn "Created, but could not read the id back. Copy it into $WRANGLER_CONFIG by hand."; exit 1; }
-  set_d1_id "$D1_ID"
-fi
 
-# ── 4 ─────────────────────────────────────────────────────────────────────
+  # ── 2 ─────────────────────────────────────────────────────────────────────
+}
+
+# ── stage 2: API token — with D1 added by hand ───────────────────────────
+stage_2() {
+stage "API token — with D1 added by hand"
+  say "The Edit Cloudflare Workers template does NOT include D1. That omission is"
+  say "the whole reason this stage exists: without it a deploy succeeds and the"
+  say "migration silently cannot run."
+  open_url "https://dash.cloudflare.com/profile/api-tokens"
+  step "Create Token → 'Edit Cloudflare Workers' → Use template."
+  step "Account Resources: include your account."
+  step "Zone Resources: include $DOMAIN."
+  step "Still in Permissions, press '+ Add more' and add:  Account · D1 · Edit"
+  step "Continue to summary → Create Token → copy it."
+  ask_secret CLOUDFLARE_API_TOKEN "Paste the token:"
+
+  if [[ -z "${CLOUDFLARE_API_TOKEN:-}" ]]; then
+    warn "No token given, so there is nothing to verify. Re-run when you have one."
+    exit 1
+  fi
+
+  say ""
+  say "Checking the token actually carries D1, rather than assuming it..."
+  if ! accounts=$(cf_api "/accounts"); then
+    warn "The Cloudflare API rejected this token outright."
+    note "Usually a bad paste, or the token was created for a different account."
+    exit 1
+  fi
+  printf '  %s✓%s token is valid\n' "$GREEN" "$RESET"
+
+  # The account id is right there in the response, so do not make anyone copy it.
+  CLOUDFLARE_ACCOUNT_ID=$(printf '%s' "$accounts" | _json 'd["result"][0]["id"]')
+  N_ACCOUNTS=$(printf '%s' "$accounts" | _json 'len(d["result"])')
+  if [[ "$N_ACCOUNTS" != "1" ]]; then
+    warn "This token can see $N_ACCOUNTS accounts; we assume the first."
+    printf '%s' "$accounts" | python3 -c '
+  import json, sys
+  for a in json.load(sys.stdin)["result"]:
+      print("    -", a["id"], a["name"])
+  ' || true
+    note "If that is wrong, edit CLOUDFLARE_ACCOUNT_ID in .env and re-run."
+  fi
+  say "  account id: $CLOUDFLARE_ACCOUNT_ID   (read off the token, not typed)"
+
+  if cf_api "/accounts/${CLOUDFLARE_ACCOUNT_ID}/d1/database" >/dev/null; then
+    printf '  %s✓%s token can reach D1\n' "$GREEN" "$RESET"
+  else
+    warn "This token CANNOT reach D1 — the exact problem this stage guards against."
+    note "Go back to the token's Permissions and add:  Account · D1 · Edit"
+    note "Editing a token's permissions does not always reissue it; if in doubt,"
+    note "create a fresh token and paste that."
+    exit 1
+  fi
+
+  set_secret CLOUDFLARE_API_TOKEN "$CLOUDFLARE_API_TOKEN"
+  set_secret CLOUDFLARE_ACCOUNT_ID "$CLOUDFLARE_ACCOUNT_ID"
+  # The account id is not a credential, so it is also kept locally where the
+  # wrangler commands below can pick it up. The token deliberately is not: it
+  # belongs in CI, and a second copy on disk is a liability with no upside.
+  write_env CLOUDFLARE_ACCOUNT_ID "$CLOUDFLARE_ACCOUNT_ID"
+
+  # ── 3 ─────────────────────────────────────────────────────────────────────
+}
+
+# ── stage 3: Create the D1 database ──────────────────────────────────────
+stage_3() {
+stage "Create the D1 database"
+  existing=$(grep -oE '"database_id"\s*:\s*"[^"]*"' "$WRANGLER_CONFIG" | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
+  if [[ "$existing" != "REPLACE_WITH_YOUR_D1_DATABASE_ID" && -n "$existing" ]]; then
+    say "$WRANGLER_CONFIG already names a database:"
+    note "  $existing"
+    if confirm "Keep it and skip creation?"; then
+      note "keeping the existing database id"
+    else
+      existing=""
+    fi
+  fi
+
+  if [[ "${existing:-}" == "REPLACE_WITH_YOUR_D1_DATABASE_ID" || -z "${existing:-}" ]]; then
+    say "Creating '$D1_NAME' with a location hint of apac."
+    note "A hint, not a promise: it does not guarantee the database runs there."
+    note "A jurisdiction (eu/us/fedramp) would be permanent and set only at"
+    note "creation — this project stores nothing that requires one."
+    if ! out=$(wrun d1 create "$D1_NAME" --location apac 2>&1); then
+      warn "d1 create failed:"
+      printf '%s\n' "$out" | sed 's/^/    /'
+      note "If it mentions authentication, the token is missing D1 Edit (stage 2)."
+      exit 1
+    fi
+    printf '%s\n' "$out" | grep -E 'database_id|"uuid"' | sed 's/^/    /' || true
+    D1_ID=$(printf '%s' "$out" | grep -oE '"database_id"\s*:\s*"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
+    if [[ -z "${D1_ID:-}" ]]; then
+      D1_ID=$(wrun d1 list --json 2>/dev/null | python3 -c \
+        "import json,sys;print(next((d['uuid'] for d in json.load(sys.stdin) if d.get('name')=='$D1_NAME'),''))" 2>/dev/null || true)
+    fi
+    if [[ -z "${D1_ID:-}" ]]; then
+      D1_ID=$(wrun d1 list 2>/dev/null | grep -E "\b$D1_NAME\b" | grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -1 || true)
+    fi
+    [[ -n "${D1_ID:-}" ]] || { warn "Created, but could not read the id back. Copy it into $WRANGLER_CONFIG by hand."; exit 1; }
+    set_d1_id "$D1_ID"
+  fi
+
+  # ── 4 ─────────────────────────────────────────────────────────────────────
+}
+
+# ── stage 4: Apply the schema ────────────────────────────────────────────
+stage_4() {
 stage "Apply the schema"
-say "Migrations, not a bare schema file: the runner records what it applied in"
-say "a d1_migrations table, backs up first, and rolls a failed one back."
-say ""
-say "Local first, so a broken migration is found before it touches production."
-if ! out=$(wrun d1 migrations apply "$D1_NAME" --local 2>&1); then
-  warn "Local migration failed:"; printf '%s\n' "$out" | sed 's/^/    /'; exit 1
-fi
-printf '%s\n' "$out" | tail -5 | sed 's/^/    /'
-printf '  %s✓%s local database migrated\n' "$GREEN" "$RESET"
-
-if confirm "Apply the same migrations to the REMOTE database?"; then
-  if ! out=$(wrun d1 migrations apply "$D1_NAME" --remote 2>&1); then
-    warn "Remote migration failed:"; printf '%s\n' "$out" | sed 's/^/    /'; exit 1
+  say "Migrations, not a bare schema file: the runner records what it applied in"
+  say "a d1_migrations table, backs up first, and rolls a failed one back."
+  say ""
+  say "Local first, so a broken migration is found before it touches production."
+  if ! out=$(wrun d1 migrations apply "$D1_NAME" --local 2>&1); then
+    warn "Local migration failed:"; printf '%s\n' "$out" | sed 's/^/    /'; exit 1
   fi
   printf '%s\n' "$out" | tail -5 | sed 's/^/    /'
-  printf '  %s✓%s remote database migrated\n' "$GREEN" "$RESET"
-else
-  warn "Skipped — the Worker will deploy against an empty database."
-fi
+  printf '  %s✓%s local database migrated\n' "$GREEN" "$RESET"
 
-# ── 5 ─────────────────────────────────────────────────────────────────────
-stage "Deploy the API Worker"
-say "Python Workers deploy through pywrangler, which wraps wrangler."
-_have uv || { warn "uv is not installed, and pywrangler needs it."; note "Install: curl -LsSf https://astral.sh/uv/install.sh | sh"; exit 1; }
-
-# Sync first, so the virtualenv matches pyproject before anything is spawned.
-#
-# This is the step that installs pywrangler, which arrives as the `workers-py`
-# dev dependency. Going straight to `uv run pywrangler deploy` is how the first
-# run of this wizard failed: a bare "Failed to spawn: `pywrangler`" that says
-# nothing about the cause and sends you looking at Cloudflare instead of at a
-# missing line in pyproject.toml.
-say "Syncing the Python environment (this is what installs pywrangler)..."
-if ! out=$(cd backend && uv sync 2>&1); then
-  warn "uv sync failed:"; printf '%s\n' "$out" | tail -15 | sed 's/^/    /'; exit 1
-fi
-if ! (cd backend && uv run pywrangler --version >/dev/null 2>&1); then
-  warn "uv sync succeeded but pywrangler still does not resolve."
-  note "Check that 'workers-py' is in the dev dependency group in"
-  note "backend/pyproject.toml — it is what provides the pywrangler command."
-  exit 1
-fi
-printf '  %s✓%s pywrangler is installed\n' "$GREEN" "$RESET"
-
-if confirm "Run 'uv run pywrangler deploy' now?"; then
-  if ! out=$(cd backend && CLOUDFLARE_API_TOKEN="$CLOUDFLARE_API_TOKEN" \
-      CLOUDFLARE_ACCOUNT_ID="$CLOUDFLARE_ACCOUNT_ID" uv run pywrangler deploy 2>&1); then
-    warn "Deploy failed:"; printf '%s\n' "$out" | tail -25 | sed 's/^/    /'
-    if printf '%s' "$out" | grep -q 'Failed to spawn'; then
-      note "That is a missing tool, not a problem with Cloudflare."
-      note "Run 'cd backend && uv sync' and try again."
-    else
-      note "Routes attach to a zone, so a zone or DNS problem surfaces here."
+  if confirm "Apply the same migrations to the REMOTE database?"; then
+    if ! out=$(wrun d1 migrations apply "$D1_NAME" --remote 2>&1); then
+      warn "Remote migration failed:"; printf '%s\n' "$out" | sed 's/^/    /'; exit 1
     fi
-    exit 1
+    printf '%s\n' "$out" | tail -5 | sed 's/^/    /'
+    printf '  %s✓%s remote database migrated\n' "$GREEN" "$RESET"
+  else
+    warn "Skipped — the Worker will deploy against an empty database."
   fi
 
-  printf '%s\n' "$out" | tail -12 | sed 's/^/    /'
-  printf '  %s✓%s deployed\n' "$GREEN" "$RESET"
-else
-  warn "Skipped the deploy; the verification stages below will fail."
-fi
+  # ── 5 ─────────────────────────────────────────────────────────────────────
+}
 
-# ── 6 ─────────────────────────────────────────────────────────────────────
-stage "Verify the Worker answers — and that Access reached it"
-say "GET /api/health is a public endpoint that reports whether Python Workers"
-say "actually expose self.ctx. ctx.access is documented for JavaScript only, so"
-say "this is how the deployed Worker answers the question instead of us assuming."
-say ""
-HEALTH_URL="https://${DOMAIN}/api/health"
-for attempt in 1 2 3 4 5; do
-  body=$(curl -sS --max-time 20 "$HEALTH_URL" 2>/dev/null || true)
-  if [[ -n "$body" ]]; then break; fi
-  note "no response yet (attempt $attempt/5) — routes can take a moment to settle"
-  sleep 5
-done
-if [[ -z "$body" ]]; then
-  warn "$HEALTH_URL did not answer."
-  note "Check the route pattern in $WRANGLER_CONFIG and that DNS is proxied."
+# ── stage 5: Deploy the API Worker ───────────────────────────────────────
+stage_5() {
+stage "Deploy the API Worker"
+  say "Python Workers deploy through pywrangler, which wraps wrangler."
+  _have uv || { warn "uv is not installed, and pywrangler needs it."; note "Install: curl -LsSf https://astral.sh/uv/install.sh | sh"; exit 1; }
+
+# pywrangler refuses to run on an old uv, but only after it has bundled the
+# whole Worker — so a version problem surfaces a minute in, dressed as a deploy
+# failure. Check before doing any work.
+UV_MIN="0.12.3"
+uv_now=$(uv --version 2>/dev/null | awk '{print $2}')
+if [[ -n "$uv_now" ]] && [[ "$(printf '%s\n%s\n' "$UV_MIN" "$uv_now" | sort -V | head -1)" != "$UV_MIN" ]]; then
+  warn "uv $uv_now is too old: pywrangler requires uv >= $UV_MIN."
+  note "Update it with:   uv self update"
+  note "(pywrangler bundles the Worker first and only then reports this, which"
+  note " looks like a deploy failure. It is not.)"
   exit 1
 fi
-printf '%s\n' "$body" | sed 's/^/    /'
-if printf '%s' "$body" | grep -q '"context_available": *true'; then
-  printf '  %s✓%s self.ctx exists — the identity wiring can work\n' "$GREEN" "$RESET"
-else
-  warn "context_available is not true."
-  note "If you chose Cloudflare Access to own the login, every protected route"
-  note "will now 401 — fail-closed, but with no way in. docs/access-limits.md"
-  note "has the two options; read it before going further."
+printf '  %s✓%s uv %s\n' "$GREEN" "$RESET" "${uv_now:-unknown}"
+
+  # Sync first, so the virtualenv matches pyproject before anything is spawned.
+  #
+  # This is the step that installs pywrangler, which arrives as the `workers-py`
+  # dev dependency. Going straight to `uv run pywrangler deploy` is how the first
+  # run of this wizard failed: a bare "Failed to spawn: `pywrangler`" that says
+  # nothing about the cause and sends you looking at Cloudflare instead of at a
+  # missing line in pyproject.toml.
+  say "Syncing the Python environment (this is what installs pywrangler)..."
+  if ! out=$(cd backend && uv sync 2>&1); then
+    warn "uv sync failed:"; printf '%s\n' "$out" | tail -15 | sed 's/^/    /'; exit 1
+  fi
+  if ! (cd backend && uv run pywrangler --version >/dev/null 2>&1); then
+    warn "uv sync succeeded but pywrangler still does not resolve."
+    note "Check that 'workers-py' is in the dev dependency group in"
+    note "backend/pyproject.toml — it is what provides the pywrangler command."
+    exit 1
+  fi
+  printf '  %s✓%s pywrangler is installed\n' "$GREEN" "$RESET"
+
+  if confirm "Run 'uv run pywrangler deploy' now?"; then
+    if ! out=$(cd backend && CLOUDFLARE_API_TOKEN="$CLOUDFLARE_API_TOKEN" \
+        CLOUDFLARE_ACCOUNT_ID="$CLOUDFLARE_ACCOUNT_ID" uv run pywrangler deploy 2>&1); then
+      warn "Deploy failed:"; printf '%s\n' "$out" | tail -25 | sed 's/^/    /'
+      if printf '%s' "$out" | grep -q 'Failed to spawn'; then
+        note "That is a missing tool, not a problem with Cloudflare."
+        note "Run 'cd backend && uv sync' and try again."
+      else
+        note "Routes attach to a zone, so a zone or DNS problem surfaces here."
+      fi
+      exit 1
+    fi
+
+    printf '%s\n' "$out" | tail -12 | sed 's/^/    /'
+    printf '  %s✓%s deployed\n' "$GREEN" "$RESET"
+  else
+    warn "Skipped the deploy; the verification stages below will fail."
+  fi
+
+  # ── 6 ─────────────────────────────────────────────────────────────────────
+}
+
+# ── stage 6: Verify the Worker answers — and that Access reached it ──────
+stage_6() {
+stage "Verify the Worker answers — and that Access reached it"
+  say "GET /api/health is a public endpoint that reports whether Python Workers"
+  say "actually expose self.ctx. ctx.access is documented for JavaScript only, so"
+  say "this is how the deployed Worker answers the question instead of us assuming."
+  say ""
+  HEALTH_URL="https://${DOMAIN}/api/health"
+  for attempt in 1 2 3 4 5; do
+    body=$(curl -sS --max-time 20 "$HEALTH_URL" 2>/dev/null || true)
+    if [[ -n "$body" ]]; then break; fi
+    note "no response yet (attempt $attempt/5) — routes can take a moment to settle"
+    sleep 5
+  done
+  if [[ -z "$body" ]]; then
+    warn "$HEALTH_URL did not answer."
+    note "Check the route pattern in $WRANGLER_CONFIG and that DNS is proxied."
+    exit 1
+  fi
+  printf '%s\n' "$body" | sed 's/^/    /'
+  if printf '%s' "$body" | grep -q '"context_available": *true'; then
+    printf '  %s✓%s self.ctx exists — the identity wiring can work\n' "$GREEN" "$RESET"
+  else
+    warn "context_available is not true."
+    note "If you chose Cloudflare Access to own the login, every protected route"
+    note "will now 401 — fail-closed, but with no way in. docs/access-limits.md"
+    note "has the two options; read it before going further."
+  fi
+
+  # ── 7 ─────────────────────────────────────────────────────────────────────
+}
+
+# ── stage 7: File one session, end to end ────────────────────────────────
+stage_7() {
+stage "File one session, end to end"
+  say "A deployment nobody has used once is not a deployment."
+  open_url "https://${DOMAIN}/chat-archives/desk"
+  step "Sign in, then paste a ChatGPT share link and file it."
+  step "Open the story — the report should render, and the transcript should show"
+  step "its sources behind the ··· on the assistant's turn."
+  open_url "https://${DOMAIN}/chat-archives"
+  step "Confirm the story is on the front page, readable signed out."
+  if confirm "Did the session file and read back correctly?"; then
+    printf '  %s✓%s end to end\n' "$GREEN" "$RESET"
+  else
+    warn "Worth fixing before wiring CI: a pipeline that deploys a broken Worker"
+    warn "faster is not an improvement."
+  fi
+
+}
+
+# ── run ───────────────────────────────────────────────────────────────────
+#
+# Resumable on purpose. Re-running the whole wizard because stage 5 failed is
+# how a setup script teaches people to stop using it, and the API token cannot
+# be kept on disk to make that cheap — it is a credential.
+#
+#   ./scripts/setup-cloudflare.sh          # from the top
+#   ./scripts/setup-cloudflare.sh --from 5 # resume at stage 5
+#   START_AT=5 ./scripts/setup-cloudflare.sh
+#
+# Stages 3 and 4 also detect their own work and skip it, so a plain re-run is
+# usually harmless; --from is for when you know where you stopped.
+START_AT=1
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --from) START_AT="${2:?--from needs a stage number}"; shift 2 ;;
+    --from=*) START_AT="${1#*=}"; shift ;;
+    -h|--help)
+      printf 'usage: %s [--from N]\n\n' "$(basename "$0")"
+      printf '  --from N   start at stage N (1-7), skipping the ones before it\n'
+      exit 0 ;;
+    *) warn "unknown argument: $1"; exit 2 ;;
+  esac
+done
+if ! [[ "$START_AT" =~ ^[0-9]+$ ]] || (( START_AT < 1 || START_AT > TOTAL_STAGES )); then
+  warn "--from must be between 1 and $TOTAL_STAGES"
+  exit 2
 fi
 
-# ── 7 ─────────────────────────────────────────────────────────────────────
-stage "File one session, end to end"
-say "A deployment nobody has used once is not a deployment."
-open_url "https://${DOMAIN}/chat-archives/desk"
-step "Sign in, then paste a ChatGPT share link and file it."
-step "Open the story — the report should render, and the transcript should show"
-step "its sources behind the ··· on the assistant's turn."
-open_url "https://${DOMAIN}/chat-archives"
-step "Confirm the story is on the front page, readable signed out."
-if confirm "Did the session file and read back correctly?"; then
-  printf '  %s✓%s end to end\n' "$GREEN" "$RESET"
+if (( START_AT == 1 )); then
+  banner "Deploy the AI Chat Archive to Cloudflare"
 else
-  warn "Worth fixing before wiring CI: a pipeline that deploys a broken Worker"
-  warn "faster is not an improvement."
+  _clear
+  printf '\n  %sResuming at stage %s of %s%s\n\n' "$BOLD" "$START_AT" "$TOTAL_STAGES" "$RESET"
 fi
+
+# Seed the counter so a resumed run shows the real stage number rather than
+# starting the count over.
+_STAGE_INDEX=$(( START_AT - 1 ))
+for _n in $(seq 1 "$TOTAL_STAGES"); do
+  (( _n < START_AT )) && continue
+  "stage_$_n"
+done
+
 
 finish

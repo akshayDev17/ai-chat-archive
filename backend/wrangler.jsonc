@@ -1,7 +1,7 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "ai-chat-archive-backend",
-  "main": "chat_archive/entry.py",
+  "main": "entry.py",
 
   // Python Workers require this flag:
   // https://developers.cloudflare.com/workers/languages/python/
