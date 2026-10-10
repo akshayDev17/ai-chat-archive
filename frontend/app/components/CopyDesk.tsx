@@ -50,12 +50,18 @@ export default function CopyDesk() {
     };
   }, [router]);
 
-  async function signOut() {
-    await devSignOut();
-    // A full navigation, not router.push: the masthead resolves identity on
-    // mount, and the shell needs to re-read it.
-    router.replace('/chat-archives');
-    router.refresh();
+  function signOut() {
+    if (DEV_AUTH) {
+      void devSignOut().then(() => {
+        // A full navigation, not router.push: the masthead resolves identity on
+        // mount, and the shell needs to re-read it.
+        router.replace('/chat-archives');
+        router.refresh();
+      });
+      return;
+    }
+    // Access established the session, so only Access's own endpoint can end it.
+    window.location.href = '/cdn-cgi/access/logout';
   }
 
   if (checking) return <p className="fine">Opening the copy desk…</p>;
@@ -80,16 +86,10 @@ export default function CopyDesk() {
         </p>
         <p className="fine desk-who">
           Signed in as <em>{email}</em>
-          {DEV_AUTH ? (
-            <>
-              {' · '}
-              {/* Local only. In production, signing out belongs to whatever
-                  provider establishes the session, not to this page. */}
-              <button type="button" className="linkish" onClick={signOut}>
-                Sign out
-              </button>
-            </>
-          ) : null}
+          {' · '}
+          <button type="button" className="linkish" onClick={signOut}>
+            Sign out
+          </button>
         </p>
       </section>
 

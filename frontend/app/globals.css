@@ -155,6 +155,29 @@ body {
   transform: translateY(1px);
 }
 
+/* Sign out sits *beside* "Copy desk" as a quiet text action rather than a
+   second button: two buttons side by side would read as two equal choices, and
+   leaving is not the job the reader came to the paper to do. Same mono micro-
+   caps as the button so the pair reads as one slot, muted so it does not
+   compete. */
+.signout {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  text-decoration: none;
+  color: var(--muted);
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  transition: color 0.12s ease;
+}
+
+.signout:hover {
+  color: var(--accent);
+}
+
 /* ── the copy desk ─────────────────────────────────── */
 .desk {
   max-width: 44rem;
