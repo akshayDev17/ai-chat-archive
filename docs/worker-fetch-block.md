@@ -1,9 +1,18 @@
 # Why ingest returns 403, and what to do about it
 
+> **⚠️ Superseded conclusion.** The `cloudflare:sockets` "way through" below works
+> only in `wrangler dev`, where the socket egresses from *your laptop*. In
+> production the same socket returns **0 bytes / `Stream was cancelled`**, because
+> `chatgpt.com` resolves to Cloudflare's own IP ranges and Cloudflare blocks
+> outbound sockets to those. The working solution is the token-gated off-Cloudflare
+> proxy — see **[`docs/fetch-proxy.md`](fetch-proxy.md)**. This page is kept for the
+> `fetch()` → 403 evidence, which is still accurate.
+
 **Root cause, proven:** Cloudflare's Workers runtime adds a `Cf-Worker` header to
 every outbound `fetch()`. ChatGPT is itself behind Cloudflare, its edge sees that
 header, and it refuses the request. The header cannot be overridden. A raw TCP
-socket from the same Worker is not stamped, and gets `200 OK`.
+socket from the same Worker is not stamped — in `wrangler dev` it gets `200 OK`,
+but in production it is blocked by the Cloudflare-IP socket rule (see the banner).
 
 ## The evidence
 

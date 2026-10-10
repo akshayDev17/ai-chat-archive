@@ -48,10 +48,10 @@ carries the vendor's mark, and the `···` under it opens that reply's sources.
 
 ### Signing in
 
-Email → one-time code → verifying → confirmed. The *screen* is ours; what
-verifies the code depends on the identity provider (see `docs/access-limits.md`
-for why Cloudflare Access cannot sit behind this page). Until the provider is
-chosen, a local server stands in for it.
+Email → one-time code → verifying → confirmed. In production the identity
+provider is **Cloudflare Access with a one-time PIN**; the OTP screen belongs to
+Cloudflare, not this page (see `docs/access-limits.md` for why Access cannot sit
+behind it). Locally a dev server stands in for it.
 
 | Email | One-time code |
 | :---: | :---: |
@@ -246,8 +246,8 @@ is **anonymous by default**, so the real journey is walkable on your machine:
 
 "Send one-time code" calls `POST /api/dev/session`, which sets the
 `archive_dev_email` cookie (with `NEXT_PUBLIC_DEV_AUTH=1`). No OTP is sent and
-none is checked — it stands in for the identity provider, which is still
-undecided. The desk has a **Sign out** so you can walk the flow again.
+none is checked — it stands in for production's Cloudflare Access OTP, which the
+local server cannot host. The desk has a **Sign out** so you can walk the flow again.
 
 ```bash
 DEV_EMAIL=you@example.com python3 backend/local_server.py  # skip signing in
@@ -270,9 +270,10 @@ include and whose absence otherwise produces a deploy that succeeds while the
 migration silently cannot run.
 
 **`docs/deploy.md` is the full guide**, and **`.github/workflows/ci.yml`** is the
-pipeline. Nothing is deployed yet; the guide — it opens with
-the one decision that shapes the rest (one Worker or two, one domain or two) and
-carries the citations for every claim.
+pipeline. Everything is deployed: the Python API Worker on `/api/*`, Access + OTP
+on `/api/desk/*`, D1, and the frontend as a static export on `/chat-archives/*`.
+Ingest reaches ChatGPT through an off-Cloudflare proxy — see **`docs/fetch-proxy.md`**
+for the reusable pattern.
 
 The short version:
 

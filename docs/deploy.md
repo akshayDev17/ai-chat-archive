@@ -1,10 +1,11 @@
 # Deploying
 
-Nothing is deployed yet. `backend/wrangler.jsonc` still carries
-`database_id: "REPLACE_WITH_YOUR_D1_DATABASE_ID"`, which is the honest marker of
-that.
+Everything in this file's scope is now live: the Python API Worker on `/api/*`,
+Cloudflare Access + OTP on `/api/desk/*`, D1, and the frontend as a static export
+served by a second Worker on `/chat-archives/*`. See §1 for the settled topology
+and §4a/`docs/fetch-proxy.md` for how ingest reaches ChatGPT.
 
-Read §1 first: it decides the shape of everything after it.
+Read §1 first: it records the topology decision, now settled (static export).
 
 ---
 
@@ -106,8 +107,12 @@ So the single-Worker option needs the reader's URL to change shape — e.g.
 `/chat-archives/story?id=<share-id>`, which is statically emittable. That is a
 product decision, not a technical one, and it is the whole of the tradeoff.
 
-**Current recommendation: two Workers, OpenNext.** Keep the URL, accept the
-second deploy. Revisit if the frontend ever becomes a true static export.
+**Decision (settled): static export, served by a second Worker — not OpenNext.**
+The frontend is `output: 'export'` plus a tiny static-assets Worker
+(`frontend/worker.js` + `frontend/wrangler.jsonc`) on `/chat-archives/*`,
+`/_next/*` and `/vendors/*`, with a UUID rewrite onto the one prerendered
+`_story.html`. The "unbounded share ids" blocker above was solved with a
+placeholder `generateStaticParams` plus that rewrite, not by changing the URL.
 
 > Cloudflare recommends **vinext** over OpenNext for Next.js on Workers, but
 > vinext "Targets Next.js 16.x" and this app is on **15.5.27**. The docs route
@@ -247,17 +252,16 @@ closed and every protected route 401s with no explanation.
 
 ---
 
-## 4a. Ingest returns 403 from the Worker — read this first
+## 4a. Ingest cannot fetch ChatGPT — read this first
 
-**The Worker cannot fetch ChatGPT share pages with `fetch()`.** Cloudflare's
-runtime stamps every subrequest with `Cf-Worker`, ChatGPT's edge sees it, and
-refuses. It cannot be overridden, and it is not our bug.
-
-Full evidence, and the way through via `cloudflare:sockets`:
-**`docs/worker-fetch-block.md`**.
+**The Worker cannot reach chatgpt.com at all.** `fetch()` is 403'd (the
+unstoppable `Cf-Worker` header), and raw sockets are blocked (chatgpt.com is on
+Cloudflare's own IP ranges). The fix is a token-gated off-Cloudflare proxy on
+Deno Deploy — see **`docs/fetch-proxy.md`** for the full story and the reusable
+setup.
 
 This does not block reading, the API, D1 or Access. It blocks *ingest* — the one
-route that fetches an external page.
+route that fetches an external page — and the proxy is how ingest reaches it.
 
 ## 4b. Running the real Worker locally — the sandbox
 
@@ -338,7 +342,9 @@ workflow sets `ARCHIVE_LIVE_TESTS=0` so it skips itself. A build that goes red
 because ChatGPT rate-limited us, or decided runner traffic looked like a bot,
 says nothing about the change under test.
 
-A **`deploy-web`** job is still to come, and its shape depends on §1.
+A **`deploy-frontend`** job is built: `npm ci` → static-export build
+(`NEXT_PUBLIC_API_BASE='' npm run build`) → `npx wrangler deploy` (the frontend
+Worker) → verify `/chat-archives` and a story URL both answer 200.
 
 ### The D1 check, and why it is a step of its own
 
