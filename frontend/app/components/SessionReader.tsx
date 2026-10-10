@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
+import { usePathname } from 'next/navigation';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
@@ -80,7 +80,6 @@ export default function SessionReader({
   id: string;
   initialMode: ReaderMode;
 }) {
-  const router = useRouter();
   const pathname = usePathname();
   const [session, setSession] = useState<SessionDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -123,9 +122,15 @@ export default function SessionReader({
   // Keep the view in the URL so it is linkable and survives a refresh:
   //   /chat-archives/<id>       → report
   //   /chat-archives/<id>?chat  → chat
+  //
+  // Written in place rather than with `router.replace`: that is a Next.js
+  // *navigation*, which re-requests the route — and, through the Suspense
+  // boundary above the reader, re-mounted it — so every toggle re-fetched the
+  // session. `history.replaceState` writes the same URL without a navigation,
+  // so the toggle stays a state change and the session is fetched once.
   function selectMode(next: ReaderMode) {
     setMode(next);
-    router.replace(next === 'chat' ? `${pathname}?chat` : pathname, { scroll: false });
+    window.history.replaceState(null, '', next === 'chat' ? `${pathname}?chat` : pathname);
   }
 
   if (error) return <div className="status error">{error}</div>;
