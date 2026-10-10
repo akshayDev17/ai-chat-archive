@@ -41,13 +41,15 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 /**
  * The signed-in reader's email, or `null` when nobody is signed in.
  *
- * The endpoint answers 200 with `{email: null}` rather than 401: "who am I?"
- * with the answer "nobody" is not an error, and a 401 here would make every
- * browser log a console error on every page view for the whole public audience
- * of a public archive.
+ * It asks on a **`/api/desk/`** path on purpose. `ctx.access` is populated only
+ * where Cloudflare Access actually runs, and the Access app covers
+ * `/api/desk/*` — so on a public path this answered "nobody" even for a
+ * signed-in reader, and the copy desk bounced straight back to the sign-in
+ * screen. Anonymous now fails (Access redirects the call, or it 401s), which
+ * every caller already treats as "signed out".
  */
 export async function whoami(): Promise<string | null> {
-  return (await request<WhoAmI>('/api/whoami')).email ?? null;
+  return (await request<WhoAmI>('/api/desk/whoami')).email ?? null;
 }
 
 /**

@@ -156,7 +156,7 @@ class D1ConversationRepository(ConversationRepository):
         served to anonymous visitors, so including the filer's address would
         publish it to anyone who opened the JSON. Provenance stays in the
         database — it keys the upsert and scopes :meth:`list_recent` — and the
-        only place it is ever returned to a client is `/api/whoami`, to the
+        only place it is ever returned to a client is `/api/desk/whoami`, to the
         person it belongs to.
         """
         result = await self._db.prepare(

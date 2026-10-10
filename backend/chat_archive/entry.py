@@ -88,16 +88,6 @@ class Default(WorkerEntrypoint):
         # -- public -----------------------------------------------------------
         # Reading is entirely public: the edition is a newspaper, so every story
         # and the front page itself are readable without an identity.
-        if path.endswith("/api/whoami"):
-            # "Who am I?" answered with "nobody" is a 200, not a 401. Being
-            # anonymous is the expected state for most visitors to a public
-            # archive, and a 401 here makes every browser log a console error on
-            # every page view for the entire public audience. 401 is reserved
-            # for the routes that actually withhold something (`/api/desk/filings`,
-            # `/api/desk/ingest`).
-            identity = await self._identity_provider().identify(request)
-            return _json({"email": identity.email if identity else None})
-
         if path.endswith("/api/sessions") and method == "GET":
             return await self._edition()
 
@@ -111,6 +101,16 @@ class Default(WorkerEntrypoint):
         identity = await self._identity_provider().identify(request)
         if identity is None:
             return _json({"error": "sign-in required"}, status=401)
+
+        if path.endswith("/api/desk/whoami") and method == "GET":
+            # "Who am I?" lives under /api/desk/ — not on a public path — because
+            # ``ctx.access`` is populated only where Cloudflare Access actually
+            # runs, and the Access app covers /api/desk/*. A public /api/whoami
+            # answered ``{"email": null}`` even for a signed-in reader, which
+            # bounced the copy desk straight back to the sign-in screen. Anonymous
+            # now means an Access redirect (or a 401 when Access is absent), which
+            # the frontend already treats as "signed out".
+            return _json({"email": identity.email})
 
         if path.endswith("/api/desk/filings") and method == "GET":
             return await self._filings(identity)

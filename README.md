@@ -76,7 +76,7 @@ are `POST /api/desk/ingest` and `GET /api/desk/filings`.
 Ownership is still recorded (`conversations.owner_email`) but it is *provenance,
 not an access boundary*, and it never leaves the server on a read: it keys the
 upsert, scopes the desk's "your recent filings" query, and is returned by exactly
-one endpoint — `/api/whoami`, to the person it belongs to. No listing carries an
+one endpoint — `/api/desk/whoami`, to the person it belongs to. No listing carries an
 address, because `/api/sessions` answers anonymous visitors and a per-row address
 there would publish every filer's email in the JSON. The upsert key remains
 `(owner_email, external_id)`, so two people can file the same share link and both
@@ -251,7 +251,7 @@ local server cannot host. The desk has a **Sign out** so you can walk the flow a
 
 ```bash
 DEV_EMAIL=you@example.com python3 backend/local_server.py  # skip signing in
-curl -H 'X-Archive-Email;' localhost:8787/api/whoami       # force anonymous
+curl -H 'X-Archive-Email;' localhost:8787/api/desk/whoami  # force anonymous → 401
 curl -H 'X-Archive-Email: guest@example.com' localhost:8787/api/desk/filings
 ```
 

@@ -23,7 +23,7 @@ Identity, in precedence order:
      in at all.
 
 **The default is anonymous.** It used to default to a fixed address, which
-meant ``/api/whoami`` always answered, the masthead always rendered its
+meant ``/api/desk/whoami`` always answered, the masthead always rendered its
 signed-in state, and the sign-in screen could never be reached — the exact flow
 the site is built around was unverifiable on the only machine you can run it on.
 Use ``DEV_EMAIL=you@example.com`` if you want the old always-signed-in
@@ -256,11 +256,13 @@ class Handler(BaseHTTPRequestHandler):
                 }
             )
 
-        if path == "/api/whoami":
-            # "Nobody" is a 200, not a 401 — see the note in entry.py. Being
-            # anonymous is the normal state for the public edition, so a 401
-            # here would put a console error on every page view.
-            return self._json({"email": self._identity() or None})
+        if path == "/api/desk/whoami":
+            # Mirrors the Worker: the identity question lives under /api/desk/ so
+            # it sits inside the path Cloudflare Access covers in production.
+            email = self._identity()
+            if not email:
+                return self._json({"error": "sign-in required"}, 401)
+            return self._json({"email": email})
 
         if path == "/api/desk/enter":
             # The sign-in handoff. In production this path sits behind Access,

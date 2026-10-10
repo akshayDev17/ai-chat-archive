@@ -61,7 +61,7 @@ One rule: **public reads, private writes.**
 Ownership is *provenance*, not an access boundary, and it **never leaves the
 server on a read**: `conversations.owner_email` keys the upsert, scopes the
 desk's "your recent filings" query, and is returned by exactly one endpoint
-(`/api/whoami`, to its owner). No listing row carries an address — `/api/sessions`
+(`/api/desk/whoami`, to its owner). No listing row carries an address — `/api/sessions`
 is served to anonymous visitors, so a per-row address would publish every filer's
 email in the JSON. It is retained in the upsert key — the pair
 `(owner_email, external_id)` — so two people can file the same share link and both

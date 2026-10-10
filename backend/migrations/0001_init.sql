@@ -26,7 +26,7 @@
 -- omit owner_email from their SELECT, because /api/sessions answers anonymous
 -- visitors and a per-row address there would publish every filer's email in the
 -- JSON. The column is read for its WHERE clause and its uniqueness, not to be
--- handed to a client. The one endpoint that returns an address is /api/whoami,
+-- handed to a client. The one endpoint that returns an address is /api/desk/whoami,
 -- to the person it belongs to.
 --
 -- The dedupe/upsert key is the PAIR (owner_email, external_id), not

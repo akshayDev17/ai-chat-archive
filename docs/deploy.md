@@ -17,7 +17,7 @@ Verified against the real domain, not inferred:
 |---|---|
 | `akshayprabhakant.com/api/health` | **200** — `{"runtime": "python-workers", "context_available": true, "access_available": false}` |
 | `akshayprabhakant.com/api/sessions` | 200, `{"sessions": []}` — D1 is reachable and empty |
-| `akshayprabhakant.com/api/whoami` | `{"email": null}` — no Access configured, so everyone is anonymous |
+| `akshayprabhakant.com/api/desk/whoami` | Access-gated — the identity question must live under `/api/desk/*`, because `ctx.access` exists only where Access runs |
 | `akshayprabhakant.com/chat-archives` | **404, served by GitHub Pages** |
 | `akshayprabhakant.com/` | 200 — **an existing portfolio site, also on GitHub Pages** |
 
