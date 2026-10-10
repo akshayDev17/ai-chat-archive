@@ -110,6 +110,39 @@ export function devSignOut(): Promise<void> {
 }
 
 /**
+ * End the session.
+ *
+ * In production the session belongs to Cloudflare Access, and its logout
+ * endpoint has **no return target**: `<domain>/cdn-cgi/access/logout` is
+ * documented, but nothing lets you say where to land afterwards (`?returnTo=`
+ * is rejected with a 400, `?redirect_url=` is ignored). So a top-level
+ * navigation to it strands the reader on Cloudflare's own sign-in page.
+ *
+ * So we ask it to clear the cookie **in the background** — a same-origin
+ * `fetch()` still gets its `Set-Cookie` processed — and let the caller navigate
+ * to wherever a signed-out reader belongs.
+ *
+ * If the background call did not take (Access normally expects a navigation),
+ * the verification below falls back to that navigation, which always works.
+ */
+export async function signOut(): Promise<void> {
+  if (DEV_AUTH) {
+    await devSignOut();
+    return;
+  }
+
+  const logoutUrl = `${API_BASE}/cdn-cgi/access/logout`;
+  try {
+    await fetch(logoutUrl, { credentials: 'include', redirect: 'manual' });
+  } catch {
+    // Leaving is the reader's intent; a failed call must not trap them here.
+  }
+
+  const stillSignedIn = await whoami().catch(() => null);
+  if (stillSignedIn) window.location.href = logoutUrl;
+}
+
+/**
  * The URL the sign-in screen navigates to in order to authenticate.
  *
  * **This must be a top-level navigation, not a `fetch()`.** Cloudflare Access

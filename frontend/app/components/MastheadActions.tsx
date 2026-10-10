@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { DEV_AUTH, devSignOut, whoami } from '@/lib/api';
+import { signOut, whoami } from '@/lib/api';
+import { AFTER_SIGN_OUT } from '@/lib/nav';
 
 /**
  * The masthead's top-right slot — the only place auth is surfaced on the
@@ -25,13 +25,10 @@ import { DEV_AUTH, devSignOut, whoami } from '@/lib/api';
  * shoulder, in a screenshot, or on a projector. The desk confirms who you are
  * signed in as, on the one page that requires signing in to see.
  *
- * Sign in is an <a> styled as a button, not a <button>: it navigates, so link
- * semantics (middle-click, open-in-new-tab, screen-reader "link") are the
- * correct ones.
- *
- * Sign out is a quiet text action beside that button, not a second button:
- * two buttons side by side would read as two equal choices, and leaving is not
- * the job the reader came to the paper to do.
+ * Sign in is an `<a>` styled as a button, not a `<button>`: it navigates, so
+ * link semantics (middle-click, open-in-new-tab, screen-reader "link") are the
+ * correct ones. Sign out is the opposite — it is an action with a side effect,
+ * not a destination — so it is a real button.
  */
 export default function MastheadActions() {
   const [signedIn, setSignedIn] = useState<boolean | null>(null);
@@ -66,38 +63,31 @@ export default function MastheadActions() {
 }
 
 /**
- * Ending the session belongs to whoever established it. In production that is
- * Cloudflare Access, whose logout endpoint is its own — a **top-level
- * navigation** to `/cdn-cgi/access/logout`, the same URL we used by hand before
- * there was a UI. Clear the cookie any other way and Access still holds the
- * session.
+ * End the session, then land on the edition.
  *
- * Locally there is no Access, so the dev cookie is cleared instead.
+ * `signOut()` clears whichever session is in play — Access's cookie in
+ * production, the dev cookie locally. We deliberately do **not** navigate to
+ * Access's own logout URL: it has no return target, so it drops the reader on
+ * Cloudflare's sign-in page instead of the paper.
+ *
+ * The landing is a full navigation, not `router.push`: the masthead resolves
+ * identity on mount, and the shell has to re-read it now the cookie is gone.
  */
 function SignOut() {
-  if (!DEV_AUTH) {
-    return (
-      <a className="signout" href="/cdn-cgi/access/logout">
-        Sign out
-      </a>
-    );
-  }
-  return <DevSignOut />;
-}
+  const [busy, setBusy] = useState(false);
 
-function DevSignOut() {
-  const router = useRouter();
   return (
     <button
       type="button"
       className="signout"
+      disabled={busy}
       onClick={async () => {
-        await devSignOut();
-        router.replace('/chat-archives');
-        router.refresh();
+        setBusy(true);
+        await signOut();
+        window.location.href = AFTER_SIGN_OUT;
       }}
     >
-      Sign out
+      {busy ? 'Signing out…' : 'Sign out'}
     </button>
   );
 }

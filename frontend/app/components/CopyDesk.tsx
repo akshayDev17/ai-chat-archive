@@ -3,8 +3,8 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { DEV_AUTH, devSignOut, ingestSession, isSignInRequired, whoami } from '@/lib/api';
-import { AFTER_SIGN_IN } from '@/lib/nav';
+import { ingestSession, isSignInRequired, signOut, whoami } from '@/lib/api';
+import { AFTER_SIGN_IN, AFTER_SIGN_OUT } from '@/lib/nav';
 
 /**
  * The copy desk: where a share link becomes a story in the paper.
@@ -50,18 +50,11 @@ export default function CopyDesk() {
     };
   }, [router]);
 
-  function signOut() {
-    if (DEV_AUTH) {
-      void devSignOut().then(() => {
-        // A full navigation, not router.push: the masthead resolves identity on
-        // mount, and the shell needs to re-read it.
-        router.replace('/chat-archives');
-        router.refresh();
-      });
-      return;
-    }
-    // Access established the session, so only Access's own endpoint can end it.
-    window.location.href = '/cdn-cgi/access/logout';
+  async function handleSignOut() {
+    await signOut();
+    // A full navigation, not router.push: the masthead resolves identity on
+    // mount, and the shell has to re-read it now the cookie is gone.
+    window.location.href = AFTER_SIGN_OUT;
   }
 
   if (checking) return <p className="fine">Opening the copy desk…</p>;
@@ -87,7 +80,7 @@ export default function CopyDesk() {
         <p className="fine desk-who">
           Signed in as <em>{email}</em>
           {' · '}
-          <button type="button" className="linkish" onClick={signOut}>
+          <button type="button" className="linkish" onClick={handleSignOut}>
             Sign out
           </button>
         </p>

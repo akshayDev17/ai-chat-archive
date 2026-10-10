@@ -16,6 +16,15 @@
 /** Where a freshly signed-in reader should land: the copy desk, ready to file. */
 export const AFTER_SIGN_IN = '/chat-archives/desk';
 
+/**
+ * Where a reader lands after signing out: the public edition, signed out.
+ *
+ * Not Access's own logout page. That endpoint has no return target, so
+ * navigating to it strands the reader on Cloudflare's sign-in screen; the
+ * session is cleared in the background instead and the reader is sent here.
+ */
+export const AFTER_SIGN_OUT = '/chat-archives';
+
 export function safeNext(raw: string | null | undefined, fallback = AFTER_SIGN_IN): string {
   if (!raw || !raw.startsWith('/') || raw.startsWith('//')) return fallback;
   return raw;
