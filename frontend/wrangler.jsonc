@@ -8,6 +8,10 @@
   // personal site (GitHub Pages) and /api/* stays the Python Worker.
   "workers_dev": false,
   "routes": [
+    // The bare path needs its own entry: `chat-archives/*` matches everything
+    // *under* /chat-archives/ but not /chat-archives itself, so the front page
+    // fell through to GitHub Pages (404).
+    { "pattern": "akshayprabhakant.com/chat-archives", "zone_name": "akshayprabhakant.com" },
     { "pattern": "akshayprabhakant.com/chat-archives/*", "zone_name": "akshayprabhakant.com" },
     { "pattern": "akshayprabhakant.com/_next/*", "zone_name": "akshayprabhakant.com" },
     { "pattern": "akshayprabhakant.com/vendors/*", "zone_name": "akshayprabhakant.com" }
