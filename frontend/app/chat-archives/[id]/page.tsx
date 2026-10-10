@@ -1,28 +1,26 @@
-import Masthead from '../../components/Masthead';
-import SessionReader from '../../components/SessionReader';
+import { Suspense } from 'react';
+import Story from './story';
 
 /**
  * /chat-archives/<share-id>          → the report
  * /chat-archives/<share-id>?chat     → the chat
  *
- * The view is read from the query string on the server and handed to the
- * client reader as its initial mode, so the toggle is linkable and survives a
- * refresh without the client needing useSearchParams.
+ * Static export (`output: 'export'`) has no server to read `params` at request
+ * time, so the id is resolved client-side in `story.tsx`. `generateStaticParams`
+ * emits one placeholder page whose HTML the serving layer rewrites every
+ * `/chat-archives/<uuid>` request onto; the client then reads the real id from
+ * the URL. Share ids are UUIDs, so `_story` can never collide with a real one.
  */
-export default async function SessionPage({
-  params,
-  searchParams,
-}: {
-  params: Promise<{ id: string }>;
-  searchParams: Promise<{ chat?: string }>;
-}) {
-  const { id } = await params;
-  const { chat } = await searchParams;
-
+export default function SessionPage() {
   return (
     <main className="frame frame-reader">
-      <Masthead section="The reading room" />
-      <SessionReader id={id} initialMode={chat !== undefined ? 'chat' : 'report'} />
+      <Suspense fallback={null}>
+        <Story />
+      </Suspense>
     </main>
   );
+}
+
+export function generateStaticParams() {
+  return [{ id: '_story' }];
 }

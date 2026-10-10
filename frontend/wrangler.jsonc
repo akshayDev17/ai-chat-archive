@@ -1,0 +1,23 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "ai-chat-archive-frontend",
+  "main": "worker.js",
+  "compatibility_date": "2026-10-10",
+
+  // The Worker answers on the archive's paths only. The root stays the
+  // personal site (GitHub Pages) and /api/* stays the Python Worker.
+  "workers_dev": false,
+  "routes": [
+    { "pattern": "akshayprabhakant.com/chat-archives/*", "zone_name": "akshayprabhakant.com" },
+    { "pattern": "akshayprabhakant.com/_next/*", "zone_name": "akshayprabhakant.com" },
+    { "pattern": "akshayprabhakant.com/vendors/*", "zone_name": "akshayprabhakant.com" }
+  ],
+
+  // The Next.js static export (produced by `npm run build`). `run_worker_first`
+  // so the story-permalink rewrite in worker.js always runs.
+  "assets": {
+    "directory": "./out",
+    "binding": "ASSETS",
+    "run_worker_first": true
+  }
+}

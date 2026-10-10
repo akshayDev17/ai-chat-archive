@@ -8,6 +8,12 @@ const nextConfig = {
   // screenshot taken from the dev server.
   devIndicators: false,
 
+  // Static export: the archive is served as plain files from a Worker at
+  // /chat-archives/*, so there is no Next.js server. This also means no image
+  // optimization endpoint, hence `images.unoptimized`.
+  output: 'export',
+  images: { unoptimized: true },
+
   // Where Next writes its build output.
   //
   // `next dev` and `next build` both own this directory and both rewrite the

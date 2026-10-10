@@ -1,6 +1,5 @@
-import Link from 'next/link';
-import AuthFlow from '../../components/AuthFlow';
-import Masthead from '../../components/Masthead';
+import { Suspense } from 'react';
+import LoginClient from './client';
 
 /**
  * The sign-in screen, at its OWN PATH — `/chat-archives/login`.
@@ -34,33 +33,15 @@ import Masthead from '../../components/Masthead';
  * Next.js resolves static segments before dynamic ones.
  *
  * `?next` is read here (not on the front page) and handed to AuthFlow, which
- * sanitizes it before navigating. A query parameter is the right shape for
- * `next`, unlike for the route itself: it is a parameter of the flow, not a
- * thing Access needs to scope.
+ * sanitizes it before navigating. Static export has no server, so the query is
+ * read client-side in `client.tsx`.
  */
-export default async function LoginPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ next?: string }>;
-}) {
-  const { next } = await searchParams;
-
+export default function LoginPage() {
   return (
     <main className="frame">
-      <Masthead section="Reader access" />
-
-      {/* Every page except the edition itself carries a way back to it, and
-          this one was the gap: the masthead here has no actions slot (there is
-          no point offering "Sign in" on the sign-in page), the nameplate is not
-          a link, and AuthFlow is a form with no exit. So a visitor who landed
-          on /chat-archives/login by any route other than the masthead button —
-          a shared link, a bookmark, a redirect from the desk — had only the
-          browser's back button. */}
-      <Link href="/chat-archives" className="back">
-        ← The edition
-      </Link>
-
-      <AuthFlow next={next} />
+      <Suspense fallback={null}>
+        <LoginClient />
+      </Suspense>
     </main>
   );
 }
