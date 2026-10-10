@@ -30,6 +30,13 @@
     }
   ],
 
+  // The off-Cloudflare proxy (Deno Deploy) that reaches chatgpt.com for us.
+  // The token is a wrangler secret (FETCH_TOKEN), NOT committed here, so it is
+  // never exposed in the repo.
+  "vars": {
+    "PROXY_BASE_URL": "https://ai-chat-archive.akshaydev17.deno.net"
+  },
+
   // Lets `wrangler dev` simulate an authenticated Access identity, so
   // CloudflareAccessIdentity can be exercised locally without a login flow.
   // The entrypoint reads `ctx.access.getIdentity().email`; this block is what
