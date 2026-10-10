@@ -2,29 +2,49 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { DEV_AUTH, devSignIn } from '@/lib/api';
-import { AFTER_SIGN_IN, safeNext } from '@/lib/nav';
+import { DEV_AUTH, devSignIn, signInUrl } from '@/lib/api';
+import { safeNext } from '@/lib/nav';
 
 type Stage = 'email' | 'otp' | 'verifying' | 'confirmed';
 
 /**
  * The sign-in flow, ending at the copy desk.
  *
- * `next` comes from the URL so a visitor bounced off the copy desk returns
- * there. It is sanitized before being used as a navigation target — see
- * `lib/nav.ts`.
+ * In production the identity provider is Cloudflare Access + OTP, and Access
+ * owns the OTP screen. So the production flow is a single "Continue to sign in"
+ * link that hands the browser to Access via a **top-level navigation** to
+ * `/api/desk/enter` — a real `<a>`, not `fetch()` and not `router.push()`, both
+ * of which would bypass Access (which only ever intercepts a navigation, and
+ * only a navigation carries the `CF_Authorization` cookie back). After the OTP,
+ * Access redirects back to `/api/desk/enter`, which our Worker turns into a
+ * redirect to `next`.
  *
- * **No identity provider is wired up yet.** The one-time PIN is undecided —
- * either Cloudflare mails it (our screen hands the browser to Access via
- * `/api/desk/enter`) or the Worker mails it via an email service. Until that
- * is chosen, the OTP stages below cannot be real, so when `DEV_AUTH` is on the
- * flow calls the local dev sign-in instead, which sets a cookie. That is what
- * makes the whole journey walkable locally; in production the button becomes a
- * navigation to Access, and the OTP stages disappear.
+ * Locally (`DEV_AUTH`) there is no Access, so the email → code → verify stages
+ * below stand in for it and set the dev cookie.
  */
 export default function AuthFlow({ next }: { next?: string | null }) {
-  const router = useRouter();
   const destination = safeNext(next);
+
+  if (!DEV_AUTH) {
+    return (
+      <section>
+        <div className="kicker">Sign in</div>
+        <h1 className="hl">Sign in to the archive</h1>
+        <p className="standfirst">
+          A one-time code is emailed by Cloudflare — no password is ever stored.
+        </p>
+        <a className="btn" href={signInUrl(destination)}>
+          Continue to sign in
+        </a>
+      </section>
+    );
+  }
+
+  return <DevSignIn destination={destination} />;
+}
+
+function DevSignIn({ destination }: { destination: string }) {
+  const router = useRouter();
   const [stage, setStage] = useState<Stage>('email');
   const [email, setEmail] = useState('');
   const [digits, setDigits] = useState<string[]>(Array(6).fill(''));
@@ -37,7 +57,7 @@ export default function AuthFlow({ next }: { next?: string | null }) {
     let cancelled = false;
     const settle = async () => {
       try {
-        if (DEV_AUTH) await devSignIn(email);
+        await devSignIn(email);
         await new Promise((r) => setTimeout(r, 700));
         if (!cancelled) setStage('confirmed');
       } catch (e) {
