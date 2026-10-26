@@ -202,6 +202,10 @@ class MemoryConversationRepository(ConversationRepository):
                     status="failed" if attempts >= max_attempts else "pending",
                 )
 
+    async def referenced_keys(self, keys: list[str]) -> set[str]:
+        wanted = set(keys)
+        return {row["r2_key"] for row in self._media if row["r2_key"] in wanted}
+
     @staticmethod
     def _rows(items, limit: int) -> list[dict]:
         # No owner_email in the row shape — these rows are served to anonymous

@@ -6,7 +6,8 @@ import { usePathname, useRouter } from 'next/navigation';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
-import { getSession, isFiledByYou } from '@/lib/api';
+import { filingStatus, getSession, type FilingStatus } from '@/lib/api';
+import { imagesLabel, mediaHref } from '@/lib/media';
 import { linkifyCitations } from '@/lib/citations';
 import { hasGenUI, stripGenUI } from '@/lib/genui';
 import { splitMention, toChatItems } from '@/lib/chat';
@@ -88,9 +89,10 @@ export default function SessionReader({
   const [session, setSession] = useState<SessionDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<ReaderMode>(initialMode);
-  // Whether the reader filed this story, and so may retract it. Starts false
-  // and stays false for everyone else, so the control never flashes.
-  const [yours, setYours] = useState(false);
+  // Whether the reader filed this story — and so may retract it and follow its
+  // image copies. Starts "not yours" and stays so for everyone else, so the
+  // controls never flash.
+  const [filing, setFiling] = useState<FilingStatus>({ yours: false, images: null });
   // Which reply's sources drawer is open. One at a time — two drawers would
   // just stack, and the index is kept so the `···` that opened it can show it
   // is the active one.
@@ -102,7 +104,7 @@ export default function SessionReader({
     getSession(id)
       .then(setSession)
       .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load session'));
-    isFiledByYou(id).then(setYours);
+    filingStatus(id).then(setFiling);
   }, [id]);
 
   const report = useMemo(
@@ -150,7 +152,17 @@ export default function SessionReader({
         <Link href="/chat-archives" className="back">
           ← All sessions
         </Link>
-        {yours ? <Retract id={id} onRetracted={() => router.push('/chat-archives')} /> : null}
+        {filing.yours ? (
+          <div className="reader-tools">
+            {filing.images ? (
+              // A full navigation: the media page reads `?id` once, on load.
+              <a href={mediaHref(id)} className="story-media">
+                {imagesLabel(filing.images)} →
+              </a>
+            ) : null}
+            <Retract id={id} onRetracted={() => router.push('/chat-archives')} />
+          </div>
+        ) : null}
       </div>
 
       <div className="kicker">{mode === 'report' ? 'The report' : 'The transcript'}</div>

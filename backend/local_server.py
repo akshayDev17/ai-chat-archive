@@ -59,7 +59,7 @@ from chat_archive.chatgpt.parser import ChatGptParser
 from chat_archive.local_media_store import DirectoryMediaStore
 from chat_archive.media_copier import copy_pending, retract_story
 from chat_archive.models import normalize_email
-from chat_archive.serializers import conversation_detail
+from chat_archive.serializers import conversation_detail, media_counts
 from chat_archive.service import ShareService
 from chat_archive.sqlite_repository import SqliteConversationRepository
 from chat_archive.urls import desk_media_target, first_param, media_key_of, query_of, safe_next
@@ -348,8 +348,14 @@ class Handler(BaseHTTPRequestHandler):
             if not email:
                 return self._json({"error": "sign-in required"}, 401)
             share_id = path.rsplit("/", 1)[-1]
-            mine = asyncio.run(repo.get(share_id, email))
-            return self._json({"id": share_id, "yours": mine is not None})
+            story = asyncio.run(repo.media_for(share_id, email))
+            return self._json(
+                {
+                    "id": share_id,
+                    "yours": story is not None,
+                    "images": media_counts(story["images"]) if story else None,
+                }
+            )
 
         if path.startswith("/api/sessions/"):
             # Public: a story is readable by permalink with no identity.

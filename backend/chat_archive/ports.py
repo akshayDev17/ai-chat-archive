@@ -140,6 +140,10 @@ class ConversationRepository(ABC):
         """Count a failed attempt: back to ``pending``, or ``failed`` at ``max_attempts``."""
 
     @abstractmethod
+    async def referenced_keys(self, keys: list[str]) -> set[str]:
+        """Which of these R2 keys any image row still points at."""
+
+    @abstractmethod
     async def get(self, share_id: str, owner_email: str | None = None) -> Conversation | None:
         """Return one conversation (messages + report), or None if absent.
 
@@ -161,6 +165,10 @@ class MediaStore(ABC):
     @abstractmethod
     async def delete_prefix(self, prefix: str) -> int:
         """Delete every object whose key starts with ``prefix``; returns how many."""
+
+    @abstractmethod
+    async def delete_keys(self, keys: list[str]) -> int:
+        """Delete exactly these objects; returns how many were asked for."""
 
     @abstractmethod
     async def get(self, key: str) -> tuple[bytes, str] | None:

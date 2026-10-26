@@ -628,15 +628,39 @@ body {
   padding-top: var(--s4);
 }
 
-/* story atoms (a whole story is one link through to its report) */
-.story {
+/* story atoms: the card is one link through to its report; the filer's
+   images line, when present, sits beneath it as its own link */
+.story { display: block; }
+
+.story-card {
   display: block;
   text-decoration: none;
   color: inherit;
   transition: opacity 0.2s var(--ease);
 }
 
-.story:hover { opacity: 0.78; }
+.story-card:hover { opacity: 0.78; }
+
+/* Only the filer sees it: a quiet mono line, like "Read the report". */
+.story-media {
+  display: inline-block;
+  margin-top: var(--s2);
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--muted);
+  text-decoration: none;
+}
+.story-media:hover { color: var(--accent); }
+
+.reader-tools {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--s2) var(--s4);
+}
+.reader-tools .story-media { margin-top: 0; }
 .story .head { margin: 0 0 var(--s1); }
 .story .kicker { margin-bottom: var(--s1); }
 .story-lead .head,

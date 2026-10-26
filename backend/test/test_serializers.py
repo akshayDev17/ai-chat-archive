@@ -19,7 +19,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from chat_archive.models import Conversation, Media, Message, Source  # noqa: E402
-from chat_archive.serializers import conversation_detail  # noqa: E402
+from chat_archive.serializers import conversation_detail, media_counts  # noqa: E402
 
 FLAG = "\U0001f1fa\U0001f1f8"  # 🇺🇸 — one code point pair, four UTF-16 units
 TOKEN = "\ue200cite\ue202turn0search0\ue201"
@@ -135,6 +135,19 @@ class TestMedia(unittest.TestCase):
         # Two astral code points before the tag → two extra UTF-16 units.
         self.assertEqual(wire["tag_start"], start + 2)
         self.assertEqual(wire["tag_start"], len(text[:start].encode("utf-16-le")) // 2)
+
+
+class TestMediaCounts(unittest.TestCase):
+    """The filer's one-line summary of a story's images, for the reader and the cards."""
+
+    def test_counts_by_status_with_copying_as_pending(self):
+        images = [{"status": s} for s in ("copied", "copied", "failed", "pending", "copying")]
+        self.assertEqual(
+            media_counts(images), {"total": 5, "copied": 2, "failed": 1, "pending": 2}
+        )
+
+    def test_no_images_is_none(self):
+        self.assertIsNone(media_counts([]))
 
 
 if __name__ == "__main__":

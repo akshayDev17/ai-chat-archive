@@ -40,6 +40,11 @@ class R2MediaStore(MediaStore):
             {"httpMetadata": {"contentType": content_type}, "customMetadata": dict(metadata or {})},
         )
 
+    async def delete_keys(self, keys: list[str]) -> int:
+        if keys:
+            await self._bucket.delete(list(keys))
+        return len(keys)
+
     async def delete_prefix(self, prefix: str) -> int:
         """Delete one story's folder (``chat-archives/<share_id>/``), page by page."""
         if not _STORY_FOLDER.match(prefix):

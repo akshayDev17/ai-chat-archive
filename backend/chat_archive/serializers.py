@@ -84,3 +84,20 @@ def conversation_detail(conversation: Conversation) -> dict:
         ],
         "messages": [_message(m) for m in conversation.messages],
     }
+
+
+def media_counts(images: list[dict]) -> dict | None:
+    """A story's images by status — ``None`` when it has none.
+
+    ``pending`` counts images still waiting *or* mid-copy: from where the filer
+    stands, both mean "not there yet".
+    """
+    if not images:
+        return None
+    statuses = [image["status"] for image in images]
+    return {
+        "total": len(statuses),
+        "copied": statuses.count("copied"),
+        "failed": statuses.count("failed"),
+        "pending": statuses.count("pending") + statuses.count("copying"),
+    }

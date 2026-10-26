@@ -43,6 +43,7 @@ from .repository import (
     MEDIA_RECLAIM_SQL,
     MEDIA_RETRY_SQL,
     RECLAIM_ERROR,
+    REFERENCED_KEYS_SQL,
     MEDIA_SUMMARY_SQL,
     _sources_by_message,
     COPIED_MEDIA_SQL,
@@ -502,3 +503,10 @@ class SqliteConversationRepository(ConversationRepository):
         with self._lock:
             self._conn.execute(MEDIA_FAIL_SQL, (error, max_attempts, media_id))
             self._conn.commit()
+
+    async def referenced_keys(self, keys: list[str]) -> set[str]:
+        if not keys:
+            return set()
+        with self._lock:
+            rows = self._conn.execute(REFERENCED_KEYS_SQL, (json.dumps(keys),)).fetchall()
+        return {r[0] for r in rows}

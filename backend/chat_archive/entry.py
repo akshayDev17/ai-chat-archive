@@ -44,7 +44,7 @@ from .chatgpt.proxy_fetcher import ProxyImageFetcher, ProxyShareFetcher, make_wo
 from .media_copier import copy_pending, retract_story
 from .r2_media_store import R2MediaStore
 from .repository import D1ConversationRepository
-from .serializers import conversation_detail
+from .serializers import conversation_detail, media_counts
 from .service import InvalidShareUrl, ShareService
 from .urls import desk_media_target, first_param, media_key_of, path_of, query_of, safe_next
 
@@ -238,13 +238,20 @@ class Default(WorkerEntrypoint):
         return _json({"owner": identity.email, "sessions": sessions})
 
     async def _filed_by(self, share_id: str, identity) -> Response:
-        """Whether *you* filed this story — so the reader knows to offer a retraction.
+        """Whether *you* filed this story, and how its image copies stand.
 
-        A yes/no rather than the owner's address: the story itself is public,
-        and the answer is only ever about the person asking.
+        The reader uses it to offer the filer a retraction and a link to the
+        story's images. A yes/no rather than the owner's address: the story
+        itself is public, and the answer is only ever about the person asking.
         """
-        mine = await self._repository().get(share_id, identity.email)
-        return _json({"id": share_id, "yours": mine is not None})
+        story = await self._repository().media_for(share_id, identity.email)
+        return _json(
+            {
+                "id": share_id,
+                "yours": story is not None,
+                "images": media_counts(story["images"]) if story else None,
+            }
+        )
 
     async def _retract(self, share_id: str, identity) -> Response:
         """Take one of your own stories out of the edition.
