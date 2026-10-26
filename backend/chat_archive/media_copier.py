@@ -50,7 +50,8 @@ async def copy_pending(
 ) -> dict:
     """Copy one batch; returns ``{"copied": n, "failed": n}`` counted per image URL."""
     claimed = await repo.claim_media(
-        limit, now.isoformat(), (now - STALE_AFTER).isoformat(), only=only
+        limit, now.isoformat(), (now - STALE_AFTER).isoformat(), only=only,
+        max_attempts=MAX_ATTEMPTS,
     )
 
     # One fetch per URL: the same picture can appear twice in one batch, and

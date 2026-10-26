@@ -22,7 +22,7 @@
  * `<Cite/>` finds its sources and an `<AsyncImage/>` its copied image by offset.
  */
 
-import { markdownLabel, markdownUrl, markersAt } from './chat.ts';
+import { markdownLabel, markdownUrl, markersAt, resolveCitationsIn } from './chat.ts';
 import type { Source } from '@/types';
 
 export type AttrValue = string | number | boolean | string[] | { raw: string };
@@ -49,11 +49,29 @@ const KNOWN_TAGS = new Set([
   'AsyncImage', 'AsyncImageGroup', ...INLINE_TAGS,
 ]);
 
-const GENUI_SIGNAL = /<(?:box|row|grid|icon|divider|Cite|AsyncImage|Entity|Link)\b/;
+/**
+ * Tags that only GenUI markup produces. `Link`, `Entity`, `icon` and `divider`
+ * are deliberately absent: they only ever appear inside these, and `<Link` is
+ * everywhere in ordinary coding answers (Next.js, React Router).
+ */
+const GENUI_SIGNAL = /<(?:box|row|grid|Cite|AsyncImage)\b/;
 
-/** Whether a reply is GenUI markup at all. Plain replies keep today's path. */
+/**
+ * Whether a reply is GenUI markup at all. Plain replies keep today's path.
+ *
+ * Code does not count: a reply *explaining* `<box>` in a code block or an
+ * inline `` `<row>` `` is a coding answer, and routing it here used to swallow
+ * its code and drop its citations.
+ */
 export function hasGenUI(text: string): boolean {
-  return GENUI_SIGNAL.test(text);
+  let prose = '';
+  let cursor = 0;
+  for (const [start, end] of codeRanges(text)) {
+    prose += text.slice(cursor, start);
+    cursor = end;
+  }
+  prose += text.slice(cursor);
+  return GENUI_SIGNAL.test(prose);
 }
 
 interface ScannedTag {
@@ -176,7 +194,37 @@ function scanTag(text: string, at: number): ScannedTag | null {
   return null;
 }
 
-/** `[start, end)` ranges of fenced code blocks, whose contents are never markup. */
+/**
+ * `[start, end)` ranges of code — fenced blocks and inline code spans — whose
+ * contents are never markup, in order.
+ */
+function codeRanges(text: string): [number, number][] {
+  const fences = fencedRanges(text);
+  const ranges: [number, number][] = [];
+  let fence = 0;
+  const inline = /`+/g;
+  for (let m = inline.exec(text); m; m = inline.exec(text)) {
+    while (fence < fences.length && fences[fence][1] <= m.index) fence++;
+    if (fences[fence] && fences[fence][0] <= m.index) {
+      inline.lastIndex = fences[fence][1];
+      continue;
+    }
+    // An inline span closes at the next run of the same length, within its
+    // paragraph (a blank line ends it, as in Markdown).
+    const tick = m[0];
+    const close = new RegExp(`(?<!\`)${tick}(?!\`)`, 'g');
+    close.lastIndex = m.index + tick.length;
+    const end = close.exec(text);
+    const paragraphEnd = text.indexOf('\n\n', m.index);
+    if (end && (paragraphEnd < 0 || end.index < paragraphEnd)) {
+      ranges.push([m.index, end.index + tick.length]);
+      inline.lastIndex = end.index + tick.length;
+    }
+  }
+  return [...ranges, ...fences].sort((a, b) => a[0] - b[0]);
+}
+
+/** `[start, end)` ranges of fenced code blocks. */
 function fencedRanges(text: string): [number, number][] {
   const ranges: [number, number][] = [];
   const fence = /^[ \t]*(`{3,}|~{3,})[^\n]*$/gm;
@@ -204,7 +252,7 @@ function fencedRanges(text: string): [number, number][] {
 export function parseGenUI(text: string): GenNode[] | null {
   const root: GenNode[] = [];
   const stack: TagNode[] = [];
-  const fences = fencedRanges(text);
+  const fences = codeRanges(text);
   let fenceIndex = 0;
 
   const children = () => (stack.length ? stack[stack.length - 1].children : root);
@@ -293,20 +341,32 @@ export function dedent(text: string): string {
  * fallback for malformed markup, and the text the copy button copies.
  */
 export function stripGenUI(text: string): string {
+  // Tags go; code — fenced or inline — is copied through untouched.
   let out = '';
   let i = 0;
-  while (i < text.length) {
-    const tag = text[i] === '<' ? scanTag(text, i) : null;
-    if (tag) {
-      i = tag.end;
-    } else {
-      out += text[i];
-      i++;
+  for (const [start, end] of [...codeRanges(text), [text.length, text.length] as [number, number]]) {
+    while (i < start) {
+      const tag = text[i] === '<' ? scanTag(text, i) : null;
+      if (tag && tag.end <= start) {
+        i = tag.end;
+      } else {
+        out += text[i];
+        i++;
+      }
     }
+    out += text.slice(Math.max(i, start), end);
+    i = Math.max(i, end);
   }
+
+  // Unindent prose lines, but never the lines inside a fenced block.
+  let inFence = false;
   return out
     .split('\n')
-    .map((line) => line.trimStart())
+    .map((line) => {
+      const fence = /^\s*(`{3,}|~{3,})/.test(line);
+      if (fence) inFence = !inFence;
+      return inFence && !fence ? line : line.trimStart();
+    })
     .join('\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
@@ -342,7 +402,9 @@ export function inlineMarkdown(
   let markdown = '';
   for (const node of nodes) {
     if (node.kind === 'text') {
-      markdown += node.text;
+      // Older-style citation tokens can sit in the prose too; their spans are
+      // message offsets, resolved against this piece.
+      markdown += resolveCitationsIn(node.text, node.start, sources);
     } else if (node.tag === 'Cite') {
       markdown += markersAt(node.start, node.end, sources);
     } else if (node.tag === 'Entity') {

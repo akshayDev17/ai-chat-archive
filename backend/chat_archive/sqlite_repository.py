@@ -41,9 +41,10 @@ from .repository import (
     MEDIA_INSERT_SQL,
     MEDIA_RECLAIM_SQL,
     MEDIA_RETRY_SQL,
+    RECLAIM_ERROR,
     MEDIA_SUMMARY_SQL,
     _sources_by_message,
-    copied_media_sql,
+    COPIED_MEDIA_SQL,
     media_by_message,
     media_image,
     media_rows_for,
@@ -199,7 +200,7 @@ class SqliteConversationRepository(ConversationRepository):
             urls = sorted({m.content_url for msg in conversation.messages for m in msg.media})
             copied = {}
             if urls:
-                found = _dicts(self._conn.execute(copied_media_sql(len(urls)), urls))
+                found = _dicts(self._conn.execute(COPIED_MEDIA_SQL, (json.dumps(urls),)))
                 copied = {r["content_url"]: (r["r2_key"], r["content_type"]) for r in found}
 
             conv_id = row[0] if row else str(uuid.uuid4())
@@ -459,9 +460,10 @@ class SqliteConversationRepository(ConversationRepository):
         now: str,
         stale_before: str,
         only: tuple[str, str] | None = None,
+        max_attempts: int = 3,
     ) -> list[dict]:
         with self._lock:
-            self._conn.execute(MEDIA_RECLAIM_SQL, (stale_before,))
+            self._conn.execute(MEDIA_RECLAIM_SQL, (RECLAIM_ERROR, max_attempts, stale_before))
             if only:
                 cursor = self._conn.execute(
                     MEDIA_CLAIM_ONE_STORY_SQL, (now, normalize_email(only[0]), only[1], limit)

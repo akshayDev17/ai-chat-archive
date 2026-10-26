@@ -118,11 +118,13 @@ class ConversationRepository(ABC):
         now: str,
         stale_before: str,
         only: tuple[str, str] | None = None,
+        max_attempts: int = 3,
     ) -> list[dict]:
         """Take up to ``limit`` pending images for copying: ``[{"id", "content_url"}]``.
 
         First reclaims rows left ``copying`` since before ``stale_before`` (their
-        run was killed). Claimed rows become ``copying`` with ``claimed_at =
+        run was killed) — counting that as a failed attempt, so an image that
+        always hangs ends ``failed`` after ``max_attempts`` instead of looping. Claimed rows become ``copying`` with ``claimed_at =
         now``. ``only=(owner_email, share_id)`` restricts it to one story — the
         media page's "Copy now". Timestamps are ISO-8601 UTC strings.
         """

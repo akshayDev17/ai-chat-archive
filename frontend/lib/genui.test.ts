@@ -210,3 +210,52 @@ test('a run that starts mid-line still loses the indent of its later lines', () 
   // own; the paragraph after the blank line must not become a code block.
   assert.equal(dedent('Intro.\n\n      A later paragraph.\n    '), 'Intro.\n\nA later paragraph.');
 });
+
+// -- ordinary replies that merely *mention* component names ---------------------
+
+const CODING_ANSWER = [
+  'Wrap it in `<Link href="/x">Home</Link>` and done. A `<row>` is not a tag here.',
+  '',
+  '```jsx',
+  '<Link href="/">',
+  '  <box>Home</box>',
+  '</Link>',
+  '```',
+].join('\n');
+
+test('a coding answer that mentions <Link> or <box> in code is not GenUI', () => {
+  assert.equal(hasGenUI(CODING_ANSWER), false);
+});
+
+test('a lone inline component outside any structure is not enough to call it GenUI', () => {
+  assert.equal(hasGenUI('See <Link url="https://x.example" title="X"/>.'), false);
+});
+
+test('inline code inside a GenUI reply stays text', () => {
+  const text = '<box>Use `<Link href="/x">` here, or `<row>`.</box>';
+  const tree = parseGenUI(text)!;
+  assert.ok(tree, 'an unclosed <row> inside inline code must not fail the parse');
+  assert.deepEqual(tags(tree), ['box']);
+});
+
+test('stripGenUI leaves fenced code exactly as written', () => {
+  const text = '<box>\n  Example:\n\n```jsx\n<Link href="/">\n  <box>Home</box>\n</Link>\n```\n</box>';
+  const out = stripGenUI(text);
+  assert.ok(out.includes('```jsx\n<Link href="/">\n  <box>Home</box>\n</Link>\n```'), out);
+  assert.ok(out.startsWith('Example:'), out);
+});
+
+test('old-style citation tokens in a GenUI text run still become markers', () => {
+  const token = '\ue200cite\ue202turn0search0\ue201';
+  const text = `<box>A claim. ${token}</box>`;
+  const start = text.indexOf(token);
+  const box = parseGenUI(text)![0] as Extract<GenNode, { kind: 'tag' }>;
+  const { markdown } = inlineMarkdown(box.children, [source(1, [start, start + token.length])]);
+  assert.equal(markdown, 'A claim. [\\[1\\]](https://example.com/1)');
+});
+
+test('a stray token with no source is removed, not printed', () => {
+  const box = parseGenUI('<box>A claim. \ue200entity\ue202["x","y"]\ue201 More.</box>')![0] as Extract<GenNode, { kind: 'tag' }>;
+  const { markdown } = inlineMarkdown(box.children, []);
+  assert.ok(!/[\ue200-\ue20f]|entity\[/.test(markdown), markdown);
+});

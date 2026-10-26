@@ -32,13 +32,18 @@ import type { MediaItem, Message, Source } from '@/types';
  * half-done.
  */
 function stripTokens(text: string): string {
-  return text
-    .replace(/\ue200url\ue202([^\ue202\ue201]*)(?:\ue202[^\ue201]*)?\ue201/g, '$1')
-    .replace(/\ue200[^\ue201]*\ue201/g, '')
-    .replace(/[\ue200-\ue20f]/g, '')
+  return removeTokens(text)
     .replace(/[ \t]+\n/g, '\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
+}
+
+/** The token removal alone, leaving whitespace as it was — for a piece of a reply. */
+function removeTokens(text: string): string {
+  return text
+    .replace(/\ue200url\ue202([^\ue202\ue201]*)(?:\ue202[^\ue201]*)?\ue201/g, '$1')
+    .replace(/\ue200[^\ue201]*\ue201/g, '')
+    .replace(/[\ue200-\ue20f]/g, '');
 }
 
 /** A URL safe to drop inside markdown link parentheses. */
@@ -69,7 +74,29 @@ function markerFor(source: Source): string {
  * make the markers in the text click through to it.
  */
 export function resolveCitations(text: string, sources: Source[]): string {
-  if (!sources.length) return stripTokens(text);
+  return stripTokens(spliceMarkers(text, sources));
+}
+
+/**
+ * Citations inside one piece of a reply — a GenUI text run that starts at
+ * `offset` in the full message. Spans are message offsets, so only those that
+ * fall wholly inside the piece apply, shifted to it. Whitespace is left alone:
+ * the piece is stitched back into a larger Markdown run.
+ */
+export function resolveCitationsIn(text: string, offset: number, sources: Source[]): string {
+  const end = offset + text.length;
+  const local = sources.map((source) => ({
+    ...source,
+    spans: source.spans
+      .filter(([s, e]) => s >= offset && e <= end)
+      .map(([s, e]) => [s - offset, e - offset] as [number, number]),
+  }));
+  return removeTokens(spliceMarkers(text, local));
+}
+
+/** Replace each cited span with its markers; leaves any unmatched tokens in place. */
+function spliceMarkers(text: string, sources: Source[]): string {
+  if (!sources.length) return text;
 
   // One entry per distinct span. Several sources can share a span exactly — a
   // GenUI `<Cite refs={[a, b, c]}/>` cites three pages at one place — and each
@@ -91,8 +118,7 @@ export function resolveCitations(text: string, sources: Source[]): string {
     cursor = end;
   }
   out += text.slice(cursor);
-
-  return stripTokens(out);
+  return out;
 }
 
 /** The markers for every source cited at exactly `[start, end)`, in index order. */

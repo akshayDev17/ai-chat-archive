@@ -48,9 +48,16 @@ MEDIA_RETRY_SQL = (
     "WHERE conversation_id = ? AND status = 'failed'"
 )
 
-#: (stale_before,)
+#: The error a reclaimed row carries: its run was killed mid-copy.
+RECLAIM_ERROR = "copy run did not finish (timed out or was killed)"
+
+#: (RECLAIM_ERROR, max_attempts, stale_before)
+#: A reclaim counts as an attempt. Otherwise an image whose fetch always hangs
+#: kills every run that takes it, is reclaimed as fresh, and loops forever —
+#: never reaching `failed`, where the owner's Retry can see it.
 MEDIA_RECLAIM_SQL = (
-    "UPDATE media SET status = 'pending', claimed_at = NULL "
+    "UPDATE media SET attempts = attempts + 1, last_error = ?, claimed_at = NULL, "
+    "status = CASE WHEN attempts + 1 >= ? THEN 'failed' ELSE 'pending' END "
     "WHERE status = 'copying' AND claimed_at < ?"
 )
 
@@ -84,13 +91,13 @@ MEDIA_FAIL_SQL = (
 )
 
 
-def copied_media_sql(count: int) -> str:
-    """Already-copied images among ``count`` content URLs: (url, url, …)."""
-    marks = ", ".join("?" for _ in range(count))
-    return (
-        "SELECT content_url, r2_key, content_type FROM media "
-        f"WHERE status = 'copied' AND content_url IN ({marks})"
-    )
+#: (json.dumps(content_urls),) — one JSON parameter, not one per URL: D1
+#: refuses more than 100 bound parameters, and a long GenUI story can show
+#: more images than that.
+COPIED_MEDIA_SQL = (
+    "SELECT content_url, r2_key, content_type FROM media "
+    "WHERE status = 'copied' AND content_url IN (SELECT value FROM json_each(?))"
+)
 
 
 def media_rows_for(conv_id: str, messages: list[Message], copied: dict) -> list[tuple]:
@@ -206,7 +213,7 @@ class D1ConversationRepository(ConversationRepository):
         urls = sorted({m.content_url for msg in conversation.messages for m in msg.media})
         copied = {}
         if urls:
-            found = await self._db.prepare(copied_media_sql(len(urls))).bind(*urls).all()
+            found = await self._db.prepare(COPIED_MEDIA_SQL).bind(json.dumps(urls)).all()
             copied = {r["content_url"]: (r["r2_key"], r["content_type"]) for r in found.results}
 
         conv_id = existing["id"] if existing else str(uuid.uuid4())
@@ -469,8 +476,9 @@ class D1ConversationRepository(ConversationRepository):
         now: str,
         stale_before: str,
         only: tuple[str, str] | None = None,
+        max_attempts: int = 3,
     ) -> list[dict]:
-        await self._db.prepare(MEDIA_RECLAIM_SQL).bind(stale_before).run()
+        await self._db.prepare(MEDIA_RECLAIM_SQL).bind(RECLAIM_ERROR, max_attempts, stale_before).run()
         if only:
             owner, share_id = normalize_email(only[0]), only[1]
             stmt = self._db.prepare(MEDIA_CLAIM_ONE_STORY_SQL).bind(now, owner, share_id, limit)
