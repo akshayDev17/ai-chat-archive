@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .models import Conversation, Message, Source
+from .models import Conversation, Media, Message, Source
 
 
 def _utf16_offsets(content: str, spans: tuple[tuple[int, int], ...]) -> list[list[int]]:
@@ -50,11 +50,25 @@ def _source(source: Source, content: str) -> dict:
     }
 
 
+def _media(media: Media, content: str) -> dict:
+    # The same code-point → UTF-16 conversion as source spans, for the same
+    # reason: the reader matches each image to its tag by offset.
+    ((tag_start, _),) = _utf16_offsets(content, ((media.tag_start, media.tag_start),))
+    return {
+        "tag_start": tag_start,
+        "ordinal": media.ordinal,
+        # Only an image already in R2 has somewhere to point. Until then the
+        # reader shows nothing rather than hotlinking images.openai.com.
+        "src": f"/api/media/{media.r2_key}" if media.status == "copied" and media.r2_key else None,
+    }
+
+
 def _message(message: Message) -> dict:
     return {
         "role": message.role,
         "content": message.content,
         "sources": [_source(s, message.content) for s in message.sources],
+        "media": [_media(m, message.content) for m in message.media],
     }
 
 

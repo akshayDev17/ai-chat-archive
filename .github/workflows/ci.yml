@@ -144,6 +144,29 @@ jobs:
           fi
           echo "Token can reach D1."
 
+      # The Worker binds the R2 bucket `ai-chat-archive-media`, and a deploy
+      # whose binding names a missing bucket fails. R2 also has to be enabled on
+      # the account first (dashboard → R2, a one-time $0 checkout on the free
+      # plan), and the token needs "Workers R2 Storage · Edit". Checked here so
+      # each of those reads as its own clear error, not a deploy stack trace.
+      - name: Check the R2 bucket exists
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          body=$(curl -sS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/r2/buckets")
+          if ! printf '%s' "$body" | grep -q '"success": *true'; then
+            echo "::error::This token cannot reach R2. Enable R2 on the account, then add 'Account · Workers R2 Storage · Edit' to the token. Cloudflare said:"
+            printf '%s\n' "$body" | head -c 400
+            exit 1
+          fi
+          if ! printf '%s' "$body" | grep -q '"name": *"ai-chat-archive-media"'; then
+            echo "::error::The R2 bucket ai-chat-archive-media does not exist. Create it: npx wrangler r2 bucket create ai-chat-archive-media"
+            exit 1
+          fi
+          echo "R2 bucket ai-chat-archive-media is reachable."
+
       # Migrations before the deploy: the new Worker may depend on a table the
       # old one never created. `migrations apply` is idempotent — it applies
       # only what the d1_migrations table says is outstanding — so this is safe

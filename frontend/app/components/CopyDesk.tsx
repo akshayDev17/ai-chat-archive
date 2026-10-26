@@ -81,6 +81,10 @@ export default function CopyDesk() {
         <p className="fine desk-who">
           Signed in as <em>{email}</em>
           {' · '}
+          <Link href="/chat-archives/desk/media" className="linkish">
+            Your images
+          </Link>
+          {' · '}
           <button type="button" className="linkish" onClick={handleSignOut}>
             Sign out
           </button>
@@ -101,6 +105,8 @@ function FileSession() {
     tone: 'ok' | 'warn' | 'error';
     /** The story this note announces, so it can be retracted from here. */
     filed?: { id: string; title: string };
+    /** Images in it, queued for copying — linked to their progress. */
+    images?: number;
   } | null>(null);
   const filed = note?.filed;
 
@@ -113,6 +119,7 @@ function FileSession() {
       setUrl('');
       setNote({
         filed: { id: result.share_id, title: result.title },
+        images: result.images,
         // A filed session with no report is not a failure — the transcript is
         // there and the story is in the edition — but it is not what was asked
         // for either, and staying quiet about it is how a missing report went
@@ -170,6 +177,17 @@ function FileSession() {
         {note ? (
           <>
             {note.text}
+            {note.images ? (
+              <>
+                {' '}
+                <a
+                  href={`/chat-archives/desk/media?id=${encodeURIComponent(note.filed?.id ?? '')}`}
+                  className="linkish"
+                >
+                  {note.images} image{note.images === 1 ? '' : 's'} copying — watch progress
+                </a>
+              </>
+            ) : null}
             {/* The wrong link, or a share made before the report was written:
                 both are noticed here, the moment the filing lands, so the way
                 to take it back sits right beside the news. */}

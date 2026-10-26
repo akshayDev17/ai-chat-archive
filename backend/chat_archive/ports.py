@@ -80,6 +80,61 @@ class ConversationRepository(ABC):
         raises on an empty owner rather than deleting unscoped.
         """
 
+    # -- media: images from GenUI replies, and the job of copying them ------
+    #
+    # `upsert` writes a message's `media` as rows (an image whose content_url
+    # is already copied anywhere arrives `copied`, so re-filing never re-copies),
+    # `get` returns them on each message, and `delete` removes them. The rows are
+    # the copy job itself; the methods below are its transitions.
+
+    @abstractmethod
+    async def media_summary(self, owner_email: str) -> list[dict]:
+        """Per filing with images, newest first:
+        ``{"id", "title", "total", "copied", "failed", "pending"}``.
+
+        ``pending`` counts rows still ``pending`` or ``copying``.
+        """
+
+    @abstractmethod
+    async def media_for(self, share_id: str, owner_email: str) -> dict | None:
+        """``{"id", "title", "images": [...]}`` for one of the caller's stories.
+
+        ``None`` when the caller has not filed it. Each image:
+        ``{"id", "message_seq", "tag_start", "ordinal", "content_url",
+        "origin_url", "status", "attempts", "last_error", "r2_key"}``.
+        """
+
+    @abstractmethod
+    async def retry_failed_media(self, share_id: str, owner_email: str) -> int | None:
+        """Put the caller's ``failed`` images back to ``pending`` with no attempts.
+
+        Returns how many were reset, or ``None`` when the caller has not filed it.
+        """
+
+    @abstractmethod
+    async def claim_media(
+        self,
+        limit: int,
+        now: str,
+        stale_before: str,
+        only: tuple[str, str] | None = None,
+    ) -> list[dict]:
+        """Take up to ``limit`` pending images for copying: ``[{"id", "content_url"}]``.
+
+        First reclaims rows left ``copying`` since before ``stale_before`` (their
+        run was killed). Claimed rows become ``copying`` with ``claimed_at =
+        now``. ``only=(owner_email, share_id)`` restricts it to one story — the
+        media page's "Copy now". Timestamps are ISO-8601 UTC strings.
+        """
+
+    @abstractmethod
+    async def finish_media(self, content_url: str, r2_key: str, content_type: str) -> None:
+        """Mark every not-yet-copied row with this ``content_url`` as ``copied``."""
+
+    @abstractmethod
+    async def fail_media(self, media_id: str, error: str, max_attempts: int = 3) -> None:
+        """Count a failed attempt: back to ``pending``, or ``failed`` at ``max_attempts``."""
+
     @abstractmethod
     async def get(self, share_id: str, owner_email: str | None = None) -> Conversation | None:
         """Return one conversation (messages + report), or None if absent.
@@ -88,3 +143,23 @@ class ConversationRepository(ABC):
         as ``None`` the lookup is the *public* one: a story reachable by its
         permalink regardless of who filed it.
         """
+
+
+class MediaStore(ABC):
+    """Where copied images live: R2 in the Worker, a directory locally."""
+
+    @abstractmethod
+    async def put(self, key: str, data: bytes, content_type: str) -> None:
+        """Store ``data`` under ``key`` (overwriting is fine: keys are content-addressed)."""
+
+    @abstractmethod
+    async def get(self, key: str) -> tuple[bytes, str] | None:
+        """``(bytes, content_type)``, or ``None`` when nothing is stored there."""
+
+
+class ImageFetcher(ABC):
+    """Fetch one image's bytes from where ChatGPT hosts it."""
+
+    @abstractmethod
+    async def fetch(self, url: str) -> tuple[bytes, str]:
+        """``(bytes, content_type)``; raises ``FetchError`` on any failure."""

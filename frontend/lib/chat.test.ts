@@ -13,7 +13,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { resolveCitations } from '../lib/chat.ts';
+import { markersAt, resolveCitations } from '../lib/chat.ts';
 import type { Source } from '../types/index.ts';
 
 const CITE = '\ue200cite\ue202turn0search0\ue201';
@@ -110,4 +110,49 @@ test('parentheses in a url do not break the markdown link', () => {
     cite({ url: 'https://en.wikipedia.org/wiki/A_(b)', spans: [[at, at + CITE.length]] }),
   ]);
   assert.ok(out.includes('https://en.wikipedia.org/wiki/A_%28b%29'), out);
+});
+
+// A GenUI `<Cite refs={[a, b, c]}/>` resolves to several pages over ONE span —
+// ChatGPT's "Business Standard +2" pill. Each page gets its own marker.
+const TAG = '<Cite refs={["a","b","c"]}/>';
+
+test('three sources on one identical span render [1][2][3]', () => {
+  const text = `Fact. ${TAG}`;
+  const span: [number, number] = [6, 6 + TAG.length];
+  const sources = [1, 2, 3].map((n) =>
+    cite({ index: n, url: `https://example.com/${n}`, spans: [span] }),
+  );
+
+  const out = resolveCitations(text, sources);
+
+  assert.equal(
+    out,
+    'Fact. [\\[1\\]](https://example.com/1)[\\[2\\]](https://example.com/2)[\\[3\\]](https://example.com/3)',
+  );
+});
+
+test('an overlapping but different span is still dropped', () => {
+  const text = `Fact. ${TAG}`;
+  const out = resolveCitations(text, [
+    cite({ index: 1, url: 'https://example.com/1', spans: [[6, 6 + TAG.length]] }),
+    cite({ index: 2, url: 'https://example.com/2', spans: [[8, 6 + TAG.length]] }),
+  ]);
+
+  assert.ok(out.includes('(https://example.com/1)'), out);
+  assert.ok(!out.includes('(https://example.com/2)'), out);
+});
+
+test('markersAt gives every source on exactly that span, in index order', () => {
+  const span: [number, number] = [6, 30];
+  const sources = [
+    cite({ index: 2, url: 'https://example.com/2', spans: [span] }),
+    cite({ index: 1, url: 'https://example.com/1', spans: [span] }),
+    cite({ index: 3, url: 'https://example.com/3', spans: [[0, 4]] }),
+  ];
+
+  assert.equal(
+    markersAt(6, 30, sources),
+    '[\\[1\\]](https://example.com/1)[\\[2\\]](https://example.com/2)',
+  );
+  assert.equal(markersAt(7, 30, sources), '');
 });

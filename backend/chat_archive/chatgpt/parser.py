@@ -5,17 +5,25 @@ from __future__ import annotations
 import re
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from ..models import Citation, Conversation, Message, Source
+from ..models import Citation, Conversation, Media, Message, Source
 from ..ports import ConversationParser
 
 # Which `content_references` types are actual sources, and how they read.
 # Anything absent from this map is skipped: `followup_a` (suggested questions)
 # and `sources_footnote` (the zero-width marker placing the Sources panel) are
 # both in the payload and neither is a citation.
+#
+# `genui_cite` is not a payload type. It is what `_genui_references` turns a
+# GenUI `<Cite refs={…}/>` into, so the one numbering loop serves both
+# citation formats.
 _KIND_BY_REFERENCE_TYPE = {
     "grouped_webpages": "cite",
     "url": "link",
+    "genui_cite": "cite",
 }
+
+# GenUI components whose resolution is a list of images.
+_IMAGE_COMPONENT_TYPES = {"async_image", "async_image_group"}
 
 # A `url` reference spells its label inline, and sometimes its target too:
 #   \ue200url\ue202<label>\ue201
@@ -79,6 +87,13 @@ class ChatGptParser(ConversationParser):
             role = (message.get("author") or {}).get("role")
             if not role:
                 continue
+            metadata = message.get("metadata") or {}
+            if metadata.get("is_message_fragment") and metadata.get("merged_message_id"):
+                # A streamed piece of a reply that was later merged into one
+                # message — which is also in the chain, with the GenUI
+                # resolutions. ChatGPT hides the fragment; keeping it printed the
+                # reply twice, the first copy without images or citations.
+                continue
             content = self._render_parts(message.get("content"))
             if content.strip():
                 # The stored text is trimmed for display, but the offsets in
@@ -94,6 +109,7 @@ class ChatGptParser(ConversationParser):
                         role=role,
                         content=trimmed,
                         sources=_extract_sources(message, trimmed, shift=lead),
+                        media=_extract_media(message, shift=lead),
                     )
                 )
         return messages
@@ -183,8 +199,12 @@ def _extract_sources(message: dict, content: str, shift: int = 0) -> list[Source
     Numbering is per message, by order of first appearance, so a source cited
     three times gets one number and one entry in the list — but all three of its
     spans are kept, so all three inline markers can point at it.
+
+    GenUI replies cite differently — a ``<Cite refs={…}/>`` tag resolved in
+    ``componentResults`` — and are folded in through :func:`_genui_references`.
     """
-    references = (message.get("metadata") or {}).get("content_references") or []
+    references = list((message.get("metadata") or {}).get("content_references") or [])
+    references += _genui_references(message)
 
     order: list[str] = []                       # canonical URLs, first seen first
     fields: dict[str, dict] = {}
@@ -219,7 +239,12 @@ def _extract_sources(message: dict, content: str, shift: int = 0) -> list[Source
         start, end = reference.get("start_idx"), reference.get("end_idx")
         if isinstance(start, int) and isinstance(end, int):
             start, end = start - shift, end - shift
-        if _span_is_trustworthy(content, start, end, reference.get("matched_text")):
+        trustworthy = (
+            _tag_span_is_trustworthy(content, start, end)
+            if reference.get("type") == "genui_cite"
+            else _span_is_trustworthy(content, start, end, reference.get("matched_text"))
+        )
+        if trustworthy:
             if (start, end) not in spans[url]:
                 spans[url].append((start, end))
 
@@ -235,6 +260,84 @@ def _extract_sources(message: dict, content: str, shift: int = 0) -> list[Source
         )
         for i, url in enumerate(order)
     ]
+
+
+def _genui_resolutions(message: dict) -> tuple[list[dict], dict]:
+    """A message's GenUI components and what each one resolved to."""
+    metadata = message.get("metadata") or {}
+    components = [c for c in metadata.get("genui_components") or [] if isinstance(c, dict)]
+    results = (
+        ((metadata.get("model_dil_v2") or {}).get("appData") or {})
+        .get("opGenui", {})
+        .get("componentResults")
+        or {}
+    )
+    return components, results
+
+
+def _genui_references(message: dict) -> list[dict]:
+    """GenUI ``<Cite/>`` tags, reshaped as ``content_references`` entries.
+
+    One component can cite several pages ("Business Standard +2" in ChatGPT);
+    each becomes its own reference over the *same* span, so each gets a number
+    and the reader shows one marker per page. The resolved item's field names
+    differ from ``grouped_webpages`` items (``source_label``, ``pub_timestamp``),
+    hence the renaming.
+    """
+    components, results = _genui_resolutions(message)
+    references: list[dict] = []
+    for component in components:
+        if component.get("type") != "cite":
+            continue
+        result = results.get(component.get("component_resolution_id")) or {}
+        for found in (result.get("state") or {}).get("items") or []:
+            if not isinstance(found, dict) or not found.get("url"):
+                continue
+            references.append(
+                {
+                    "type": "genui_cite",
+                    "start_idx": component.get("start_index"),
+                    "end_idx": component.get("end_index"),
+                    "items": [
+                        {
+                            "url": found["url"],
+                            "title": found.get("title") or "",
+                            "attribution": found.get("source_label") or "",
+                            "pub_date": found.get("pub_timestamp"),
+                        }
+                    ],
+                }
+            )
+    return references
+
+
+def _extract_media(message: dict, shift: int = 0) -> list[Media]:
+    """The images a message's GenUI components resolved to, as pending copies.
+
+    ``tag_start`` is shifted by the same leading trim as source spans, so it
+    points at the component's tag in the *stored* text.
+    """
+    components, results = _genui_resolutions(message)
+    media: list[Media] = []
+    for component in components:
+        start = component.get("start_index")
+        if component.get("type") not in _IMAGE_COMPONENT_TYPES or not isinstance(start, int):
+            continue
+        result = results.get(component.get("component_resolution_id")) or {}
+        images = [
+            i for i in (result.get("state") or {}).get("images") or []
+            if isinstance(i, dict) and i.get("content_url")
+        ]
+        for ordinal, found in enumerate(images):
+            media.append(
+                Media(
+                    tag_start=start - shift,
+                    ordinal=ordinal,
+                    content_url=str(found["content_url"]),
+                    origin_url=str(found.get("url") or ""),
+                )
+            )
+    return media
 
 
 def _pick_source_fields(reference: dict) -> tuple[str, str, str, int | None]:
@@ -300,6 +403,20 @@ def _span_is_trustworthy(content: str, start, end, matched_text) -> bool:
     if isinstance(matched_text, str) and matched_text and matched_text != span:
         return False
     return True
+
+
+def _tag_span_is_trustworthy(content: str, start, end) -> bool:
+    """Whether ``content[start:end]`` really is a GenUI ``<Cite …/>`` tag.
+
+    The GenUI counterpart of :func:`_span_is_trustworthy`: there is no
+    private-use token to look for, but the span must be exactly the tag.
+    """
+    if not isinstance(start, int) or not isinstance(end, int):
+        return False
+    if start < 0 or end > len(content) or start >= end:
+        return False
+    span = content[start:end]
+    return span.startswith("<Cite") and span.endswith("/>")
 
 
 def _domain_of(url: str) -> str:

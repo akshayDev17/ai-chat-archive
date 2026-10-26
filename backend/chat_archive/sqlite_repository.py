@@ -31,7 +31,29 @@ from datetime import datetime, timezone
 
 from .models import Citation, Conversation, Message, Source, normalize_email
 from .ports import ConversationRepository
-from .repository import _sources_by_message
+from .repository import (
+    MEDIA_CLAIM_ONE_STORY_SQL,
+    MEDIA_CLAIM_SQL,
+    MEDIA_COUNT_FAILED_SQL,
+    MEDIA_FAIL_SQL,
+    MEDIA_FINISH_SQL,
+    MEDIA_FOR_CONVERSATION_SQL,
+    MEDIA_INSERT_SQL,
+    MEDIA_RECLAIM_SQL,
+    MEDIA_RETRY_SQL,
+    MEDIA_SUMMARY_SQL,
+    _sources_by_message,
+    copied_media_sql,
+    media_by_message,
+    media_image,
+    media_rows_for,
+)
+
+
+def _dicts(cursor) -> list[dict]:
+    """Rows as dicts keyed by column name, the shape the shared media helpers read."""
+    names = [d[0] for d in cursor.description]
+    return [dict(zip(names, row)) for row in cursor.fetchall()]
 
 #: Stories imported before archives became per-email are attributed to this
 #: address. Override with ARCHIVE_LEGACY_OWNER if the local DB was populated
@@ -86,6 +108,24 @@ CREATE INDEX IF NOT EXISTS idx_conversations_external ON conversations(external_
 CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id, seq);
 CREATE INDEX IF NOT EXISTS idx_reports_conv ON reports(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_sources_message ON sources(conversation_id, message_seq, seq);
+CREATE TABLE IF NOT EXISTS media (
+  id              TEXT PRIMARY KEY,
+  conversation_id TEXT NOT NULL REFERENCES conversations(id),
+  message_seq     INTEGER NOT NULL,
+  tag_start       INTEGER NOT NULL,
+  ordinal         INTEGER NOT NULL,
+  content_url     TEXT NOT NULL,
+  origin_url      TEXT,
+  status          TEXT NOT NULL DEFAULT 'pending',
+  attempts        INTEGER NOT NULL DEFAULT 0,
+  last_error      TEXT,
+  claimed_at      TEXT,
+  r2_key          TEXT,
+  content_type    TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_media_message ON media(conversation_id, message_seq, tag_start, ordinal);
+CREATE INDEX IF NOT EXISTS idx_media_status ON media(status, claimed_at);
+CREATE INDEX IF NOT EXISTS idx_media_content_url ON media(content_url);
 """
 
 
@@ -155,6 +195,13 @@ class SqliteConversationRepository(ConversationRepository):
                 (owner, conversation.share_id),
             ).fetchone()
 
+            # Read before the delete below, as in the D1 repository.
+            urls = sorted({m.content_url for msg in conversation.messages for m in msg.media})
+            copied = {}
+            if urls:
+                found = _dicts(self._conn.execute(copied_media_sql(len(urls)), urls))
+                copied = {r["content_url"]: (r["r2_key"], r["content_type"]) for r in found}
+
             conv_id = row[0] if row else str(uuid.uuid4())
             if row:
                 self._conn.execute(
@@ -164,6 +211,7 @@ class SqliteConversationRepository(ConversationRepository):
                 self._conn.execute("DELETE FROM messages WHERE conversation_id = ?", (conv_id,))
                 self._conn.execute("DELETE FROM reports WHERE conversation_id = ?", (conv_id,))
                 self._conn.execute("DELETE FROM sources WHERE conversation_id = ?", (conv_id,))
+                self._conn.execute("DELETE FROM media WHERE conversation_id = ?", (conv_id,))
             else:
                 self._conn.execute(
                     "INSERT INTO conversations "
@@ -211,6 +259,10 @@ class SqliteConversationRepository(ConversationRepository):
                 ],
             )
 
+            self._conn.executemany(
+                MEDIA_INSERT_SQL, media_rows_for(conv_id, conversation.messages, copied)
+            )
+
             if conversation.report:
                 report_id = str(uuid.uuid4())
                 self._conn.execute(
@@ -251,6 +303,7 @@ class SqliteConversationRepository(ConversationRepository):
                 return False
 
             conv_id = row[0]
+            self._conn.execute("DELETE FROM media WHERE conversation_id = ?", (conv_id,))
             self._conn.execute("DELETE FROM sources WHERE conversation_id = ?", (conv_id,))
             self._conn.execute("DELETE FROM reports WHERE conversation_id = ?", (conv_id,))
             self._conn.execute("DELETE FROM messages WHERE conversation_id = ?", (conv_id,))
@@ -292,6 +345,7 @@ class SqliteConversationRepository(ConversationRepository):
                 "SELECT markdown, citations FROM reports WHERE conversation_id = ?",
                 (conv_id,),
             ).fetchone()
+            media_rows = _dicts(self._conn.execute(MEDIA_FOR_CONVERSATION_SQL, (conv_id,)))
 
         citations = []
         if report_row and report_row[1]:
@@ -312,7 +366,12 @@ class SqliteConversationRepository(ConversationRepository):
             share_id=share_id,
             title=title,
             messages=[
-                Message(role=r[1], content=r[2], sources=_sources_by_message(source_dicts, r[0]))
+                Message(
+                    role=r[1],
+                    content=r[2],
+                    sources=_sources_by_message(source_dicts, r[0]),
+                    media=media_by_message(media_rows, r[0]),
+                )
                 for r in messages
             ],
             report=report_row[0] if report_row else None,
@@ -357,3 +416,68 @@ class SqliteConversationRepository(ConversationRepository):
             {"id": r[0], "title": r[1], "created_at": r[2], "source": r[3], "markdown": r[4]}
             for r in rows
         ]
+
+    # -- media (same SQL as D1; see repository.py) --------------------------
+
+    def _owned_conversation(self, share_id: str, owner_email: str):
+        owner = normalize_email(owner_email)
+        if not owner:
+            raise ValueError("media operations require an owner_email.")
+        return self._conn.execute(
+            "SELECT id, title FROM conversations WHERE owner_email = ? AND external_id = ?",
+            (owner, share_id),
+        ).fetchone()
+
+    async def media_summary(self, owner_email: str) -> list[dict]:
+        owner = normalize_email(owner_email)
+        if not owner:
+            raise ValueError("media_summary requires an owner_email.")
+        with self._lock:
+            return _dicts(self._conn.execute(MEDIA_SUMMARY_SQL, (owner,)))
+
+    async def media_for(self, share_id: str, owner_email: str) -> dict | None:
+        with self._lock:
+            conv = self._owned_conversation(share_id, owner_email)
+            if not conv:
+                return None
+            rows = _dicts(self._conn.execute(MEDIA_FOR_CONVERSATION_SQL, (conv[0],)))
+        return {"id": share_id, "title": conv[1], "images": [media_image(r) for r in rows]}
+
+    async def retry_failed_media(self, share_id: str, owner_email: str) -> int | None:
+        with self._lock:
+            conv = self._owned_conversation(share_id, owner_email)
+            if not conv:
+                return None
+            failed = self._conn.execute(MEDIA_COUNT_FAILED_SQL, (conv[0],)).fetchone()[0]
+            self._conn.execute(MEDIA_RETRY_SQL, (conv[0],))
+            self._conn.commit()
+        return failed
+
+    async def claim_media(
+        self,
+        limit: int,
+        now: str,
+        stale_before: str,
+        only: tuple[str, str] | None = None,
+    ) -> list[dict]:
+        with self._lock:
+            self._conn.execute(MEDIA_RECLAIM_SQL, (stale_before,))
+            if only:
+                cursor = self._conn.execute(
+                    MEDIA_CLAIM_ONE_STORY_SQL, (now, normalize_email(only[0]), only[1], limit)
+                )
+            else:
+                cursor = self._conn.execute(MEDIA_CLAIM_SQL, (now, limit))
+            claimed = _dicts(cursor)
+            self._conn.commit()
+        return [{"id": r["id"], "content_url": r["content_url"]} for r in claimed]
+
+    async def finish_media(self, content_url: str, r2_key: str, content_type: str) -> None:
+        with self._lock:
+            self._conn.execute(MEDIA_FINISH_SQL, (r2_key, content_type, content_url))
+            self._conn.commit()
+
+    async def fail_media(self, media_id: str, error: str, max_attempts: int = 3) -> None:
+        with self._lock:
+            self._conn.execute(MEDIA_FAIL_SQL, (error, max_attempts, media_id))
+            self._conn.commit()

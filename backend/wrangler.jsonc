@@ -30,6 +30,17 @@
     }
   ],
 
+  // Images from ChatGPT's GenUI replies, copied out of images.openai.com so a
+  // story keeps its pictures. Keys are img/<sha256(url)>.<ext>; the Worker serves
+  // them publicly at /api/media/<key>. Create once with:
+  //   npx wrangler r2 bucket create ai-chat-archive-media
+  "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "ai-chat-archive-media" }],
+
+  // The copier. Filing only records images as pending — the Free plan's 50
+  // subrequests per invocation cannot fit a 28-image story — and this copies a
+  // batch of ten every minute. See chat_archive/media_copier.py.
+  "triggers": { "crons": ["* * * * *"] },
+
   // The off-Cloudflare proxy (Deno Deploy) that reaches chatgpt.com for us.
   // The token is a wrangler secret (FETCH_TOKEN), NOT committed here, so it is
   // never exposed in the repo.

@@ -33,17 +33,20 @@ Two things this file has to get right:
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 
 from workers import Response, WorkerEntrypoint
 
 from .auth import CloudflareAccessIdentity
 from .chatgpt.decoder import ChatGptFlightDecoder
 from .chatgpt.parser import ChatGptParser
-from .chatgpt.proxy_fetcher import ProxyShareFetcher, make_worker_fetch
+from .chatgpt.proxy_fetcher import ProxyImageFetcher, ProxyShareFetcher, make_worker_fetch
+from .media_copier import copy_pending
+from .r2_media_store import R2MediaStore
 from .repository import D1ConversationRepository
 from .serializers import conversation_detail
 from .service import InvalidShareUrl, ShareService
-from .urls import first_param, path_of, query_of, safe_next
+from .urls import desk_media_target, first_param, media_key_of, path_of, query_of, safe_next
 
 
 def _json(body: object, status: int = 200) -> Response:
@@ -75,6 +78,37 @@ class Default(WorkerEntrypoint):
     def _repository(self) -> D1ConversationRepository:
         return D1ConversationRepository(self.env.DB)
 
+    def _media_store(self) -> R2MediaStore:
+        return R2MediaStore(self.env.MEDIA)
+
+    def _image_fetcher(self) -> ProxyImageFetcher:
+        env = getattr(self, "env", None)
+        return ProxyImageFetcher(
+            make_worker_fetch(),
+            getattr(env, "PROXY_BASE_URL", "") or "",
+            getattr(env, "FETCH_TOKEN", "") or "",
+        )
+
+    async def _copy_media(self, only: tuple[str, str] | None = None) -> dict:
+        return await copy_pending(
+            self._repository(),
+            self._media_store(),
+            self._image_fetcher(),
+            datetime.now(timezone.utc),
+            only=only,
+        )
+
+    # --------------------------------------------------------------- schedule
+
+    async def scheduled(self, controller, env, ctx):
+        """The once-a-minute Cron Trigger: copy one batch of pending images.
+
+        Filing only records images as pending, because the Free plan's 50
+        subrequests per invocation cannot fit a 28-image story. This is where
+        the bytes actually move. See ``media_copier.py``.
+        """
+        await self._copy_media()
+
     def _identity_provider(self) -> CloudflareAccessIdentity:
         return CloudflareAccessIdentity(getattr(self, "ctx", None))
 
@@ -95,6 +129,10 @@ class Default(WorkerEntrypoint):
 
         if "/api/sessions/" in path and method == "GET":
             return await self._read_story(path.rsplit("/", 1)[-1])
+
+        if "/api/media/" in path and "/api/desk/" not in path and method == "GET":
+            # A story's images are as public as the story.
+            return await self._serve_media(media_key_of(path))
 
         # -- protected --------------------------------------------------------
         # Everything below files copy (or asks who you are as a filer), so it
@@ -125,6 +163,10 @@ class Default(WorkerEntrypoint):
 
         if "/api/desk/sessions/" in path and method == "DELETE":
             return await self._retract(path.rsplit("/", 1)[-1], identity)
+
+        media_target = desk_media_target(path)
+        if media_target is not None:
+            return await self._desk_media(media_target, method, identity)
 
         if path.endswith("/api/desk/enter"):
             return self._session_start(request)
@@ -215,6 +257,49 @@ class Default(WorkerEntrypoint):
             return _json({"error": "You have no filed story with that id"}, status=404)
         return _json({"id": share_id, "retracted": True})
 
+    async def _serve_media(self, key: str | None) -> Response:
+        if key is None:
+            return _json({"error": "Not found"}, status=404)
+        found = await self._media_store().get(key)
+        if found is None:
+            return _json({"error": "Not found"}, status=404)
+        data, content_type = found
+        # Keys are content-addressed, so a key's bytes never change.
+        return Response(
+            data,
+            headers={
+                "content-type": content_type,
+                "cache-control": "public, max-age=31536000, immutable",
+            },
+        )
+
+    async def _desk_media(self, target, method: str, identity) -> Response:
+        """The media page's endpoints, all scoped to the caller's own stories."""
+        share_id, action = target
+        repo = self._repository()
+
+        if share_id is None and method == "GET":
+            return _json({"filings": await repo.media_summary(identity.email)})
+
+        if share_id is not None and action is None and method == "GET":
+            story = await repo.media_for(share_id, identity.email)
+            if story is None:
+                return _json({"error": "You have no filed story with that id"}, status=404)
+            return _json(story)
+
+        if share_id is not None and action == "retry" and method == "POST":
+            reset = await repo.retry_failed_media(share_id, identity.email)
+            if reset is None:
+                return _json({"error": "You have no filed story with that id"}, status=404)
+            return _json({"reset": reset})
+
+        if share_id is not None and action == "copy" and method == "POST":
+            if await repo.media_for(share_id, identity.email) is None:
+                return _json({"error": "You have no filed story with that id"}, status=404)
+            return _json(await self._copy_media(only=(identity.email, share_id)))
+
+        return Response("Not found", status=404)
+
     async def _read_story(self, share_id: str) -> Response:
         conversation = await self._repository().get(share_id)
         if conversation is None:
@@ -248,6 +333,7 @@ class Default(WorkerEntrypoint):
                 "messages": len(conversation.messages),
                 "report_length": len(conversation.report or ""),
                 "citations": len(conversation.citations),
+                "images": sum(len(m.media) for m in conversation.messages),
                 "owner": identity.email,
             }
         )

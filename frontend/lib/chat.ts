@@ -1,4 +1,4 @@
-import type { Message, Source } from '@/types';
+import type { MediaItem, Message, Source } from '@/types';
 
 /**
  * ChatGPT stores its web sources in `message.metadata.content_references`, and
@@ -42,12 +42,12 @@ function stripTokens(text: string): string {
 }
 
 /** A URL safe to drop inside markdown link parentheses. */
-function markdownUrl(url: string): string {
+export function markdownUrl(url: string): string {
   return url.replace(/[()]/g, (c) => (c === '(' ? '%28' : '%29')).replace(/ /g, '%20');
 }
 
 /** Escape the characters that would break a markdown link label. */
-function markdownLabel(text: string): string {
+export function markdownLabel(text: string): string {
   return text.replace(/[[\]]/g, (c) => `\\${c}`);
 }
 
@@ -71,24 +71,37 @@ function markerFor(source: Source): string {
 export function resolveCitations(text: string, sources: Source[]): string {
   if (!sources.length) return stripTokens(text);
 
-  const spans = sources
-    .flatMap((source) => source.spans.map(([start, end]) => ({ start, end, source })))
-    .sort((a, b) => a.start - b.start);
+  // One entry per distinct span. Several sources can share a span exactly — a
+  // GenUI `<Cite refs={[a, b, c]}/>` cites three pages at one place — and each
+  // of them gets a marker there.
+  const spans = new Map<string, [number, number]>();
+  for (const source of sources) {
+    for (const [start, end] of source.spans) spans.set(`${start}:${end}`, [start, end]);
+  }
 
-  // Scan forward, copying the text between spans and splicing a marker in at
+  // Scan forward, copying the text between spans and splicing the markers in at
   // each one. A span that overlaps the previous one, or runs past the end, is
   // dropped: an untrustworthy offset must not be allowed to rewrite the wrong
   // characters, and its token will be stripped below anyway.
   let out = '';
   let cursor = 0;
-  for (const { start, end, source } of spans) {
+  for (const [start, end] of [...spans.values()].sort((a, b) => a[0] - b[0])) {
     if (start < cursor || end > text.length || start >= end) continue;
-    out += text.slice(cursor, start) + markerFor(source);
+    out += text.slice(cursor, start) + markersAt(start, end, sources);
     cursor = end;
   }
   out += text.slice(cursor);
 
   return stripTokens(out);
+}
+
+/** The markers for every source cited at exactly `[start, end)`, in index order. */
+export function markersAt(start: number, end: number, sources: Source[]): string {
+  return sources
+    .filter((source) => source.spans.some(([s, e]) => s === start && e === end))
+    .sort((a, b) => a.index - b.index)
+    .map(markerFor)
+    .join('');
 }
 
 /**
@@ -125,7 +138,9 @@ export function splitMention(text: string): { mention: string | null; rest: stri
 
 export type ChatItem =
   | { kind: 'user'; content: string }
-  | { kind: 'assistant'; content: string; sources: Source[] }
+  // `raw` is the stored text, untouched: a GenUI reply is rendered from it,
+  // because its offsets — Cite spans, image `tag_start` — are into that text.
+  | { kind: 'assistant'; content: string; raw: string; sources: Source[]; media: MediaItem[] }
   | { kind: 'system'; content: string }
   | { kind: 'tools'; count: number };
 
@@ -153,7 +168,13 @@ export function toChatItems(messages: Message[]): ChatItem[] {
     }
 
     if (message.role === 'assistant') {
-      items.push({ kind: 'assistant', content, sources: message.sources ?? [] });
+      items.push({
+        kind: 'assistant',
+        content,
+        raw: message.content,
+        sources: message.sources ?? [],
+        media: message.media ?? [],
+      });
       continue;
     }
 

@@ -31,7 +31,7 @@ BACKEND = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND))
 
 from chat_archive.local_repository import MemoryConversationRepository  # noqa: E402
-from chat_archive.models import Conversation, Message, Source  # noqa: E402
+from chat_archive.models import Conversation, Media, Message, Source  # noqa: E402
 from chat_archive.repository import D1ConversationRepository  # noqa: E402
 from chat_archive.sqlite_repository import SqliteConversationRepository  # noqa: E402
 
@@ -74,10 +74,12 @@ class FakeD1:
     the repository's queries, joins and WHERE clauses all run for real.
     """
 
-    def __init__(self, schema_path: Path):
+    def __init__(self, migrations_dir: Path):
         self._conn = sqlite3.connect(":memory:")
         self._conn.row_factory = sqlite3.Row
-        self._conn.executescript(schema_path.read_text())
+        # Every migration, in order — exactly what `d1 migrations apply` runs.
+        for migration in sorted(migrations_dir.glob("*.sql")):
+            self._conn.executescript(migration.read_text())
 
     def prepare(self, sql: str) -> _FakeD1Statement:
         return _FakeD1Statement(self._conn, sql)
@@ -307,6 +309,7 @@ class NoOrphanedRows:
             Source(index=1, kind="cite", title="A page", url="https://example.com",
                    attribution="example.com", pub_date=None, spans=((0, 1),))
         )
+        story.messages[1].media.append(Media(tag_start=0, ordinal=0, content_url=img(1)))
         asyncio.run(self.repo.upsert(story))
         asyncio.run(self.repo.upsert(conversation("share-b", "Keeper", AKSHAY)))
 
@@ -316,17 +319,231 @@ class NoOrphanedRows:
         self.assertEqual(self.count_rows("messages"), 2)  # share-b's two
         self.assertEqual(self.count_rows("reports"), 1)
         self.assertEqual(self.count_rows("sources"), 0)
+        self.assertEqual(self.count_rows("media"), 0)
+
+
+# --------------------------------------------------------------------- media
+
+
+def img(n: int) -> str:
+    return f"https://images.openai.com/static-rsc-4/img{n}?purpose=fullsize"
+
+
+T0 = "2026-10-26T12:00:00+00:00"
+T0_PLUS_1 = "2026-10-26T12:01:00+00:00"
+T0_PLUS_6 = "2026-10-26T12:06:00+00:00"
+T0_MINUS_4 = "2026-10-26T11:56:00+00:00"
+
+
+def illustrated(share_id: str, title: str, owner: str, urls: list[str]) -> Conversation:
+    """A filed story whose second message shows one image per url, in order."""
+    conv = conversation(share_id, title, owner)
+    conv.messages[1].media.extend(
+        Media(tag_start=10 * i, ordinal=0, content_url=url) for i, url in enumerate(urls)
+    )
+    return conv
+
+
+class MediaContract:
+    """Image rows: stored at filing, worked through by the copier, owned by the filer.
+
+    The ``media`` rows are the copy job itself — no queue, no separate state —
+    so every transition the copier and the media page rely on is pinned here,
+    against every repository.
+    """
+
+    def _statuses(self, share_id: str, owner: str) -> list[str]:
+        return [i["status"] for i in asyncio.run(self.repo.media_for(share_id, owner))["images"]]
+
+    def _claim(self, limit=10, now=T0, stale_before=T0_MINUS_4, only=None):
+        return asyncio.run(self.repo.claim_media(limit, now, stale_before, only=only))
+
+    # -- filing --------------------------------------------------------------
+
+    def test_filing_stores_images_as_pending(self):
+        asyncio.run(self.repo.upsert(illustrated("share-a", "Story", AKSHAY, [img(1), img(2)])))
+
+        media = asyncio.run(self.repo.get("share-a", AKSHAY)).messages[1].media
+        self.assertEqual([m.content_url for m in media], [img(1), img(2)])
+        self.assertEqual({m.status for m in media}, {"pending"})
+
+    def test_get_returns_media_in_tag_order(self):
+        conv = conversation("share-a", "Story", AKSHAY)
+        conv.messages[1].media.extend(
+            [
+                Media(tag_start=50, ordinal=0, content_url=img(3)),
+                Media(tag_start=10, ordinal=1, content_url=img(2)),
+                Media(tag_start=10, ordinal=0, content_url=img(1)),
+            ]
+        )
+        asyncio.run(self.repo.upsert(conv))
+
+        media = asyncio.run(self.repo.get("share-a")).messages[1].media
+        self.assertEqual([(m.tag_start, m.ordinal) for m in media], [(10, 0), (10, 1), (50, 0)])
+
+    def test_refiling_keeps_copied_images_copied(self):
+        asyncio.run(self.repo.upsert(illustrated("share-a", "Story", AKSHAY, [img(1)])))
+        self._claim()
+        asyncio.run(self.repo.finish_media(img(1), "img/abc.jpg", "image/jpeg"))
+
+        asyncio.run(self.repo.upsert(illustrated("share-a", "Story, re-filed", AKSHAY, [img(1)])))
+
+        media = asyncio.run(self.repo.get("share-a", AKSHAY)).messages[1].media
+        self.assertEqual(media[0].status, "copied")
+        self.assertEqual(media[0].r2_key, "img/abc.jpg")
+        self.assertEqual(media[0].content_type, "image/jpeg")
+
+    def test_a_newly_filed_story_reuses_an_image_copied_for_another(self):
+        asyncio.run(self.repo.upsert(illustrated("share-a", "First", AKSHAY, [img(1)])))
+        self._claim()
+        asyncio.run(self.repo.finish_media(img(1), "img/abc.jpg", "image/jpeg"))
+
+        asyncio.run(self.repo.upsert(illustrated("share-b", "Second", GUEST, [img(1), img(2)])))
+
+        self.assertEqual(self._statuses("share-b", GUEST), ["copied", "pending"])
+
+    def test_retracting_removes_media_rows(self):
+        asyncio.run(self.repo.upsert(illustrated("share-a", "Story", AKSHAY, [img(1)])))
+        asyncio.run(self.repo.delete("share-a", AKSHAY))
+
+        self.assertIsNone(asyncio.run(self.repo.media_for("share-a", AKSHAY)))
+        self.assertEqual(self._claim(), [])
+
+    # -- the media page ------------------------------------------------------
+
+    def test_media_summary_counts_and_scopes_to_owner(self):
+        asyncio.run(self.repo.upsert(illustrated("share-a", "Mine", AKSHAY, [img(1), img(2), img(3)])))
+        asyncio.run(self.repo.upsert(conversation("share-plain", "No images", AKSHAY)))
+        asyncio.run(self.repo.upsert(illustrated("share-b", "Theirs", GUEST, [img(4)])))
+        claimed = self._claim(limit=2, only=(AKSHAY, "share-a"))
+        asyncio.run(self.repo.finish_media(claimed[0]["content_url"], "img/k.jpg", "image/jpeg"))
+        asyncio.run(self.repo.fail_media(claimed[1]["id"], "boom", max_attempts=1))
+
+        summary = asyncio.run(self.repo.media_summary(AKSHAY))
+
+        self.assertEqual(
+            summary,
+            [{"id": "share-a", "title": "Mine", "total": 3, "copied": 1, "failed": 1, "pending": 1}],
+        )
+
+    def test_media_for_lists_each_image_with_its_status(self):
+        asyncio.run(self.repo.upsert(illustrated("share-a", "Mine", AKSHAY, [img(1)])))
+
+        story = asyncio.run(self.repo.media_for("share-a", AKSHAY))
+
+        self.assertEqual(story["id"], "share-a")
+        self.assertEqual(story["title"], "Mine")
+        (image,) = story["images"]
+        self.assertEqual(image["content_url"], img(1))
+        self.assertEqual(image["status"], "pending")
+        self.assertEqual(image["attempts"], 0)
+        self.assertEqual(image["message_seq"], 1)
+        for key in ("id", "tag_start", "ordinal", "origin_url", "last_error", "r2_key"):
+            self.assertIn(key, image)
+
+    def test_media_for_is_none_for_someone_elses_story(self):
+        asyncio.run(self.repo.upsert(illustrated("share-a", "Mine", AKSHAY, [img(1)])))
+        self.assertIsNone(asyncio.run(self.repo.media_for("share-a", GUEST)))
+
+    def test_retry_resets_only_failed_rows(self):
+        asyncio.run(self.repo.upsert(illustrated("share-a", "Mine", AKSHAY, [img(1), img(2)])))
+        first = self._claim(limit=1)[0]
+        asyncio.run(self.repo.fail_media(first["id"], "boom", max_attempts=1))
+
+        self.assertEqual(asyncio.run(self.repo.retry_failed_media("share-a", AKSHAY)), 1)
+
+        images = asyncio.run(self.repo.media_for("share-a", AKSHAY))["images"]
+        self.assertEqual([i["status"] for i in images], ["pending", "pending"])
+        self.assertEqual([i["attempts"] for i in images], [0, 0])
+        self.assertEqual([i["last_error"] for i in images], [None, None])
+
+    def test_retry_is_none_for_someone_elses_story(self):
+        asyncio.run(self.repo.upsert(illustrated("share-a", "Mine", AKSHAY, [img(1)])))
+        self.assertIsNone(asyncio.run(self.repo.retry_failed_media("share-a", GUEST)))
+
+    # -- the copier's job transitions ----------------------------------------
+
+    def test_claim_takes_at_most_limit_and_marks_copying(self):
+        asyncio.run(self.repo.upsert(illustrated("share-a", "Mine", AKSHAY, [img(1), img(2), img(3)])))
+
+        claimed = self._claim(limit=2)
+
+        self.assertEqual(len(claimed), 2)
+        self.assertEqual(set(claimed[0]), {"id", "content_url"})
+        self.assertEqual(sorted(self._statuses("share-a", AKSHAY)), ["copying", "copying", "pending"])
+        self.assertEqual(len(self._claim(limit=5)), 1)
+
+    def test_claim_only_scopes_to_one_story(self):
+        asyncio.run(self.repo.upsert(illustrated("share-a", "Mine", AKSHAY, [img(1)])))
+        asyncio.run(self.repo.upsert(illustrated("share-b", "Theirs", GUEST, [img(2)])))
+
+        claimed = self._claim(only=(GUEST, "share-b"))
+
+        self.assertEqual([c["content_url"] for c in claimed], [img(2)])
+        self.assertEqual(self._statuses("share-a", AKSHAY), ["pending"])
+
+    def test_claim_only_ignores_the_same_link_filed_by_someone_else(self):
+        asyncio.run(self.repo.upsert(illustrated("shared", "Mine", AKSHAY, [img(1)])))
+        asyncio.run(self.repo.upsert(illustrated("shared", "Theirs", GUEST, [img(2)])))
+
+        claimed = self._claim(only=(AKSHAY, "shared"))
+
+        self.assertEqual([c["content_url"] for c in claimed], [img(1)])
+
+    def test_claim_skips_copied_and_failed_rows(self):
+        asyncio.run(self.repo.upsert(illustrated("share-a", "Mine", AKSHAY, [img(1), img(2)])))
+        first, second = self._claim()
+        asyncio.run(self.repo.finish_media(first["content_url"], "img/k.jpg", "image/jpeg"))
+        asyncio.run(self.repo.fail_media(second["id"], "boom", max_attempts=1))
+
+        self.assertEqual(self._claim(now=T0_PLUS_6, stale_before=T0_PLUS_1), [])
+
+    def test_a_stale_copying_row_is_reclaimed(self):
+        asyncio.run(self.repo.upsert(illustrated("share-a", "Mine", AKSHAY, [img(1)])))
+        self._claim(now=T0)
+
+        # The run that claimed it was killed; six minutes later it is fair game.
+        reclaimed = self._claim(now=T0_PLUS_6, stale_before=T0_PLUS_1)
+
+        self.assertEqual([c["content_url"] for c in reclaimed], [img(1)])
+
+    def test_a_fresh_copying_row_is_not_reclaimed(self):
+        asyncio.run(self.repo.upsert(illustrated("share-a", "Mine", AKSHAY, [img(1)])))
+        self._claim(now=T0)
+
+        self.assertEqual(self._claim(now=T0_PLUS_1, stale_before=T0_MINUS_4), [])
+
+    def test_finish_marks_every_row_with_that_url(self):
+        asyncio.run(self.repo.upsert(illustrated("share-a", "Mine", AKSHAY, [img(1)])))
+        asyncio.run(self.repo.upsert(illustrated("share-b", "Theirs", GUEST, [img(1)])))
+        self._claim(limit=1)
+
+        asyncio.run(self.repo.finish_media(img(1), "img/k.jpg", "image/png"))
+
+        self.assertEqual(self._statuses("share-a", AKSHAY), ["copied"])
+        self.assertEqual(self._statuses("share-b", GUEST), ["copied"])
+
+    def test_fail_retries_then_gives_up_at_three(self):
+        asyncio.run(self.repo.upsert(illustrated("share-a", "Mine", AKSHAY, [img(1)])))
+
+        for attempt in (1, 2, 3):
+            (row,) = self._claim()
+            asyncio.run(self.repo.fail_media(row["id"], f"boom {attempt}"))
+            (image,) = asyncio.run(self.repo.media_for("share-a", AKSHAY))["images"]
+            self.assertEqual(image["attempts"], attempt)
+            self.assertEqual(image["last_error"], f"boom {attempt}")
+            self.assertEqual(image["status"], "failed" if attempt == 3 else "pending")
 
 
 # ------------------------------------------------------------ implementations
 
 
-class TestMemoryRepository(OwnershipContract, unittest.TestCase):
+class TestMemoryRepository(OwnershipContract, MediaContract, unittest.TestCase):
     def make_repository(self):
         return MemoryConversationRepository()
 
 
-class TestSqliteRepository(OwnershipContract, NoOrphanedRows, unittest.TestCase):
+class TestSqliteRepository(OwnershipContract, MediaContract, NoOrphanedRows, unittest.TestCase):
     def make_repository(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
@@ -336,11 +553,11 @@ class TestSqliteRepository(OwnershipContract, NoOrphanedRows, unittest.TestCase)
         return self.repo._conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
 
 
-class TestD1Repository(OwnershipContract, NoOrphanedRows, unittest.TestCase):
+class TestD1Repository(OwnershipContract, MediaContract, NoOrphanedRows, unittest.TestCase):
     """Runs the D1 repository's real SQL against a SQLite-backed fake binding."""
 
     def make_repository(self):
-        self._d1 = FakeD1(BACKEND / "migrations" / "0001_init.sql")
+        self._d1 = FakeD1(BACKEND / "migrations")
         return D1ConversationRepository(self._d1)
 
     def count_rows(self, table: str) -> int:

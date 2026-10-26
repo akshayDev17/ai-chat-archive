@@ -8,9 +8,11 @@ import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
 import { getSession, isFiledByYou } from '@/lib/api';
 import { linkifyCitations } from '@/lib/citations';
+import { hasGenUI, stripGenUI } from '@/lib/genui';
 import { splitMention, toChatItems } from '@/lib/chat';
 import { vendorLabel, vendorMark } from '@/lib/vendors';
 import type { SessionDetail, Source } from '@/types';
+import GenUIMessage from './GenUI';
 import Retract from './Retract';
 import SourcesPanel from './SourcesPanel';
 
@@ -217,6 +219,9 @@ export default function SessionReader({
 
             if (item.kind === 'assistant') {
               const open = openSources?.index === i;
+              // ChatGPT's component markup (cards, icon rows, images) renders
+              // through the GenUI registry; plain replies keep the Markdown path.
+              const genui = hasGenUI(item.raw);
               return (
                 <div className="row row-assistant" key={i}>
                   <span className="mark">
@@ -224,10 +229,19 @@ export default function SessionReader({
                   </span>
                   <div className="msg">
                     <div className="plain">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{item.content}</ReactMarkdown>
+                      {genui ? (
+                        <GenUIMessage
+                          text={item.raw}
+                          sources={item.sources}
+                          media={item.media}
+                          storyId={id}
+                        />
+                      ) : (
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{item.content}</ReactMarkdown>
+                      )}
                     </div>
                     <div className="acts">
-                      <CopyButton text={item.content} />
+                      <CopyButton text={genui ? stripGenUI(item.raw) : item.content} />
                       {item.sources.length ? (
                         // The `···` was decoration until there was something
                         // behind it. Now it discloses the reply's sources in the

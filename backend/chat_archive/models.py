@@ -60,10 +60,40 @@ class Source:
 
 
 @dataclass(frozen=True)
+class Media:
+    """One image a GenUI component shows, and how far copying it has got.
+
+    ``<AsyncImage/>`` and ``<AsyncImageGroup/>`` name a search query, not a
+    picture; the picture is in the payload's ``componentResults``, as an
+    ``images.openai.com`` URL the archive does not control. So the parser
+    records each image as ``pending`` and the copier moves the bytes into R2
+    later, outside the filing request (the Free plan's 50-subrequest cap rules
+    out doing it inline).
+
+    ``tag_start`` is the code-point offset of the component's tag in the stored
+    message text — the same coordinate space as ``Source.spans`` — and is how
+    the reader puts each image back where it belongs. ``ordinal`` orders the
+    images of one group.
+    """
+
+    tag_start: int
+    ordinal: int
+    content_url: str
+    origin_url: str = ""
+    #: ``pending`` | ``copying`` | ``copied`` | ``failed``
+    status: str = "pending"
+    r2_key: str | None = None
+    content_type: str | None = None
+    attempts: int = 0
+    last_error: str | None = None
+
+
+@dataclass(frozen=True)
 class Message:
     role: str
     content: str
     sources: list[Source] = field(default_factory=list)
+    media: list[Media] = field(default_factory=list)
 
 
 @dataclass(frozen=True)

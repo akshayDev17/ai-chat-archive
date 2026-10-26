@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import Any, Awaitable, Callable
 
-from ..ports import ShareFetcher
+from ..ports import ImageFetcher, ShareFetcher
 
 DEFAULT_USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -60,3 +60,25 @@ class HttpShareFetcher(ShareFetcher):
         if status != 200:
             raise FetchError(f"Share page fetch failed: HTTP {status}")
         return await response.text()
+
+
+class HttpImageFetcher(ImageFetcher):
+    """Fetch an image directly with urllib — the local dev server's fetcher.
+
+    Locally there is no Cf-Worker header and no Cloudflare egress IP, so the
+    proxy hop the Worker needs is unnecessary.
+    """
+
+    async def fetch(self, url: str) -> tuple[bytes, str]:
+        import asyncio
+        import urllib.request
+
+        def _get() -> tuple[bytes, str]:
+            request = urllib.request.Request(url, headers={"User-Agent": DEFAULT_USER_AGENT})
+            try:
+                with urllib.request.urlopen(request, timeout=30) as response:
+                    return response.read(), response.headers.get("Content-Type") or ""
+            except Exception as exc:  # noqa: BLE001 - surfaced as one failed attempt
+                raise FetchError(f"image fetch failed: {exc}") from exc
+
+        return await asyncio.to_thread(_get)
