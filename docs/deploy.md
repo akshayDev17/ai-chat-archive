@@ -204,8 +204,15 @@ copy, and it belongs on the external drive.
 The Worker binds the bucket **`ai-chat-archive-media`** as `MEDIA`. It holds the
 images ChatGPT's GenUI replies show (`<AsyncImage/>`, `<AsyncImageGroup/>`),
 copied out of `images.openai.com` so a story keeps its pictures. Keys are
-`img/<sha256(content_url)>.<ext>`; the Worker serves them publicly at
-`/api/media/<key>` with an immutable cache header.
+`chat-archives/<share_id>/<chatgpt message id>/<NN>.<ext>` — one folder per
+story (the share link's id, as in the story's URL), one per message, the image's
+order within it — and each object carries its share id, message id, source URL
+and source page as R2 custom metadata. Retracting the last copy of a story
+deletes its folder. The Worker serves them publicly at `/api/media/<key>`.
+
+Images copied before migration `0003` sit in a flat `img/` folder and keep
+serving from there. Filing those stories again copies their images into the new
+layout; after that, the `img/` folder can be deleted from the dashboard.
 
 Copying is asynchronous. Filing records each image as a `pending` row in the
 `media` table (migration `0002_media.sql`); a Cron Trigger (`* * * * *`, see

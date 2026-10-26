@@ -15,17 +15,25 @@ from .ports import ConversationRepository
 # positional and listed beside each one.
 
 #: (conversation_id, message_seq, tag_start, ordinal, content_url, origin_url,
-#:  status, r2_key, content_type, id)
+#:  status, r2_key, content_type, id, object_path)
 MEDIA_INSERT_SQL = (
     "INSERT INTO media "
     "(conversation_id, message_seq, tag_start, ordinal, content_url, origin_url, "
-    "status, r2_key, content_type, id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    "status, r2_key, content_type, id, object_path) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 )
+
+#: Where a story's images live in R2: one folder per share link.
+MEDIA_ROOT = "chat-archives"
+
+
+def story_prefix(share_id: str) -> str:
+    """The R2 folder holding every image of one story (trailing slash included)."""
+    return f"{MEDIA_ROOT}/{share_id}/"
 
 #: (conversation_id,)
 MEDIA_FOR_CONVERSATION_SQL = (
     "SELECT id, message_seq, tag_start, ordinal, content_url, origin_url, status, "
-    "attempts, last_error, r2_key, content_type FROM media "
+    "attempts, last_error, r2_key, content_type, object_path FROM media "
     "WHERE conversation_id = ? ORDER BY message_seq, tag_start, ordinal"
 )
 
@@ -69,7 +77,7 @@ _MEDIA_CLAIM_SQL = (
     "SELECT m.id FROM media m JOIN conversations c ON c.id = m.conversation_id "
     "WHERE m.status = 'pending'{scope} "
     "ORDER BY c.created_at, m.message_seq, m.tag_start, m.ordinal LIMIT ?"
-    ") RETURNING id, content_url"
+    ") RETURNING id, content_url, origin_url, object_path"
 )
 #: (now, limit)
 MEDIA_CLAIM_SQL = _MEDIA_CLAIM_SQL.format(scope="")
@@ -78,10 +86,10 @@ MEDIA_CLAIM_ONE_STORY_SQL = _MEDIA_CLAIM_SQL.format(
     scope=" AND c.owner_email = ? AND c.external_id = ?"
 )
 
-#: (r2_key, content_type, content_url)
+#: (r2_key, content_type, media_id)
 MEDIA_FINISH_SQL = (
     "UPDATE media SET status = 'copied', r2_key = ?, content_type = ?, "
-    "last_error = NULL, claimed_at = NULL WHERE content_url = ? AND status != 'copied'"
+    "last_error = NULL, claimed_at = NULL WHERE id = ?"
 )
 
 #: (error, max_attempts, media_id)
@@ -91,26 +99,49 @@ MEDIA_FAIL_SQL = (
 )
 
 
-#: (json.dumps(content_urls),) — one JSON parameter, not one per URL: D1
+#: (json.dumps(object_paths),) — one JSON parameter, not one per path: D1
 #: refuses more than 100 bound parameters, and a long GenUI story can show
 #: more images than that.
 COPIED_MEDIA_SQL = (
-    "SELECT content_url, r2_key, content_type FROM media "
-    "WHERE status = 'copied' AND content_url IN (SELECT value FROM json_each(?))"
+    "SELECT object_path, content_url, r2_key, content_type FROM media "
+    "WHERE status = 'copied' AND object_path IN (SELECT value FROM json_each(?))"
 )
 
 
-def media_rows_for(conv_id: str, messages: list[Message], copied: dict) -> list[tuple]:
+def media_paths(share_id: str, messages: list[Message]) -> list[list[str]]:
+    """Each image's R2 path (without extension), message by message.
+
+    ``chat-archives/<share_id>/<message id>/<NN>``: the story's folder, the
+    message's own folder (ChatGPT's id, stable across re-filings), and the
+    image's order in that message. A message without an id falls back to its
+    position.
+    """
+    paths = []
+    for seq, message in enumerate(messages):
+        folder = f"{story_prefix(share_id)}{message.external_id or f'm{seq:03d}'}"
+        media = message.media
+        ordered = sorted(range(len(media)), key=lambda i: (media[i].tag_start, media[i].ordinal))
+        numbers = {i: n for n, i in enumerate(ordered, start=1)}
+        paths.append([f"{folder}/{numbers[i]:02d}" for i in range(len(message.media))])
+    return paths
+
+
+def media_rows_for(
+    conv_id: str, share_id: str, messages: list[Message], copied: dict
+) -> list[tuple]:
     """Insert parameters for a conversation's media, carrying copies over.
 
-    ``copied`` maps content_url → (r2_key, content_type) for images already in
-    R2, so re-filing a story — or filing a second story that shows the same
-    picture — never queues a copy that has already been made.
+    ``copied`` maps object_path → (content_url, r2_key, content_type) for
+    images already in R2. An image is carried over only when the same picture
+    sits at the same path — re-filing a story, or a second filer of the same
+    link — so a copy is never made twice, and never shared between stories.
     """
     rows = []
-    for seq, message in enumerate(messages):
-        for media in message.media:
-            key, content_type = copied.get(media.content_url, (None, None))
+    for seq, (message, paths) in enumerate(zip(messages, media_paths(share_id, messages))):
+        for media, path in zip(message.media, paths):
+            url, key, content_type = copied.get(path, (None, None, None))
+            if url != media.content_url:
+                key = content_type = None
             rows.append(
                 (
                     conv_id,
@@ -123,6 +154,7 @@ def media_rows_for(conv_id: str, messages: list[Message], copied: dict) -> list[
                     key,
                     content_type,
                     str(uuid.uuid4()),
+                    path,
                 )
             )
     return rows
@@ -147,13 +179,18 @@ def media_by_message(rows, message_seq: int) -> list[Media]:
     ]
 
 
+def claimed_row(row) -> dict:
+    """What the copier needs of a claimed row."""
+    return {key: row[key] for key in ("id", "content_url", "origin_url", "object_path")}
+
+
 def media_image(row) -> dict:
     """One image as the media page sees it."""
     return {
         key: row[key]
         for key in (
             "id", "message_seq", "tag_start", "ordinal", "content_url",
-            "origin_url", "status", "attempts", "last_error", "r2_key",
+            "origin_url", "status", "attempts", "last_error", "r2_key", "object_path",
         )
     }
 
@@ -210,11 +247,14 @@ class D1ConversationRepository(ConversationRepository):
 
         # Read before the delete below: this story's own copied images are among
         # the ones a re-filing must not copy again.
-        urls = sorted({m.content_url for msg in conversation.messages for m in msg.media})
+        paths = [p for ps in media_paths(conversation.share_id, conversation.messages) for p in ps]
         copied = {}
-        if urls:
-            found = await self._db.prepare(COPIED_MEDIA_SQL).bind(json.dumps(urls)).all()
-            copied = {r["content_url"]: (r["r2_key"], r["content_type"]) for r in found.results}
+        if paths:
+            found = await self._db.prepare(COPIED_MEDIA_SQL).bind(json.dumps(paths)).all()
+            copied = {
+                r["object_path"]: (r["content_url"], r["r2_key"], r["content_type"])
+                for r in found.results
+            }
 
         conv_id = existing["id"] if existing else str(uuid.uuid4())
         if existing:
@@ -287,7 +327,8 @@ class D1ConversationRepository(ConversationRepository):
 
         media_stmt = self._db.prepare(MEDIA_INSERT_SQL)
         media_batch = [
-            media_stmt.bind(*row) for row in media_rows_for(conv_id, conversation.messages, copied)
+            media_stmt.bind(*row)
+            for row in media_rows_for(conv_id, conversation.share_id, conversation.messages, copied)
         ]
         if media_batch:
             await self._db.batch(media_batch)
@@ -485,10 +526,10 @@ class D1ConversationRepository(ConversationRepository):
         else:
             stmt = self._db.prepare(MEDIA_CLAIM_SQL).bind(now, limit)
         result = await stmt.all()
-        return [{"id": r["id"], "content_url": r["content_url"]} for r in result.results]
+        return [claimed_row(r) for r in result.results]
 
-    async def finish_media(self, content_url: str, r2_key: str, content_type: str) -> None:
-        await self._db.prepare(MEDIA_FINISH_SQL).bind(r2_key, content_type, content_url).run()
+    async def finish_media(self, media_id: str, r2_key: str, content_type: str) -> None:
+        await self._db.prepare(MEDIA_FINISH_SQL).bind(r2_key, content_type, media_id).run()
 
     async def fail_media(self, media_id: str, error: str, max_attempts: int = 3) -> None:
         await self._db.prepare(MEDIA_FAIL_SQL).bind(error, max_attempts, media_id).run()

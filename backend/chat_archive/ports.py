@@ -82,8 +82,9 @@ class ConversationRepository(ABC):
 
     # -- media: images from GenUI replies, and the job of copying them ------
     #
-    # `upsert` writes a message's `media` as rows (an image whose content_url
-    # is already copied anywhere arrives `copied`, so re-filing never re-copies),
+    # `upsert` writes a message's `media` as rows, each with its R2 path
+    # `chat-archives/<share_id>/<message id>/<NN>` (an image already copied to
+    # that path arrives `copied`, so re-filing never re-copies),
     # `get` returns them on each message, and `delete` removes them. The rows are
     # the copy job itself; the methods below are its transitions.
 
@@ -101,7 +102,7 @@ class ConversationRepository(ABC):
 
         ``None`` when the caller has not filed it. Each image:
         ``{"id", "message_seq", "tag_start", "ordinal", "content_url",
-        "origin_url", "status", "attempts", "last_error", "r2_key"}``.
+        "origin_url", "status", "attempts", "last_error", "r2_key", "object_path"}``.
         """
 
     @abstractmethod
@@ -120,7 +121,8 @@ class ConversationRepository(ABC):
         only: tuple[str, str] | None = None,
         max_attempts: int = 3,
     ) -> list[dict]:
-        """Take up to ``limit`` pending images for copying: ``[{"id", "content_url"}]``.
+        """Take up to ``limit`` pending images for copying:
+        ``[{"id", "content_url", "origin_url", "object_path"}]``.
 
         First reclaims rows left ``copying`` since before ``stale_before`` (their
         run was killed) — counting that as a failed attempt, so an image that
@@ -130,8 +132,8 @@ class ConversationRepository(ABC):
         """
 
     @abstractmethod
-    async def finish_media(self, content_url: str, r2_key: str, content_type: str) -> None:
-        """Mark every not-yet-copied row with this ``content_url`` as ``copied``."""
+    async def finish_media(self, media_id: str, r2_key: str, content_type: str) -> None:
+        """Mark one image ``copied``, stored at ``r2_key``."""
 
     @abstractmethod
     async def fail_media(self, media_id: str, error: str, max_attempts: int = 3) -> None:
@@ -151,8 +153,14 @@ class MediaStore(ABC):
     """Where copied images live: R2 in the Worker, a directory locally."""
 
     @abstractmethod
-    async def put(self, key: str, data: bytes, content_type: str) -> None:
-        """Store ``data`` under ``key`` (overwriting is fine: keys are content-addressed)."""
+    async def put(
+        self, key: str, data: bytes, content_type: str, metadata: dict[str, str] | None = None
+    ) -> None:
+        """Store ``data`` under ``key``, with optional string ``metadata`` (provenance)."""
+
+    @abstractmethod
+    async def delete_prefix(self, prefix: str) -> int:
+        """Delete every object whose key starts with ``prefix``; returns how many."""
 
     @abstractmethod
     async def get(self, key: str) -> tuple[bytes, str] | None:

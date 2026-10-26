@@ -298,5 +298,20 @@ class OddPayloadShapes(unittest.TestCase):
         self.assertEqual(ChatGptParser().parse("share-id", payload).messages[-1].sources, [])
 
 
+class MessageIds(unittest.TestCase):
+    def test_each_message_keeps_chatgpts_own_id(self):
+        # The id names the message's folder in R2, and stays the same when the
+        # share is filed again — unlike its position, which shifts if earlier
+        # messages are dropped (as merged fragments now are).
+        payload = genui_payload("Reply.", [], {})
+        payload["mapping"]["n2"]["message"]["id"] = "47780937-aaaa-bbbb-cccc-0123456789ab"
+        messages = ChatGptParser().parse("share-id", payload).messages
+        self.assertEqual(messages[-1].external_id, "47780937-aaaa-bbbb-cccc-0123456789ab")
+
+    def test_a_message_without_its_own_id_falls_back_to_the_node_id(self):
+        messages = ChatGptParser().parse("share-id", genui_payload("Reply.", [], {})).messages
+        self.assertEqual(messages[-1].external_id, "n2")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

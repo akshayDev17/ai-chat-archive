@@ -5,17 +5,18 @@ minute (and on the media page's "Copy now") to move the bytes. A batch is ten
 images: on the Workers Free plan an invocation gets 50 subrequests, and each
 image costs a fetch and an R2 write, plus a D1 update.
 
-Keys are content-addressed by URL — ``img/<sha256(content_url)>.<ext>`` — so the
-same picture in two stories is stored once, and a re-filed story finds its
-images already copied.
+Each image is stored at the path fixed when its story was filed —
+``chat-archives/<share_id>/<message id>/<NN>.<ext>`` — so the bucket reads as
+one folder per story and one per message, and a story's images can be deleted
+as a folder. Every object carries its provenance as R2 custom metadata.
 """
 
 from __future__ import annotations
 
-import hashlib
 from datetime import datetime, timedelta
 
 from .ports import ConversationRepository, ImageFetcher, MediaStore
+from .repository import story_prefix
 
 MEDIA_BATCH = 10
 MAX_ATTEMPTS = 3
@@ -32,12 +33,28 @@ _EXTENSIONS = {
 }
 
 
-def media_key(content_url: str, content_type: str) -> str | None:
-    """Where an image is stored, or ``None`` for a type the archive does not keep."""
+#: Why a row filed before per-story paths cannot be copied (see 0003).
+NO_PATH_ERROR = "filed before images were stored per story — file this story again to copy them"
+
+
+def media_key(object_path: str, content_type: str) -> str | None:
+    """An image's R2 key — its path plus the type's extension — or ``None``
+    for a type the archive does not keep."""
     extension = _EXTENSIONS.get(content_type)
     if extension is None:
         return None
-    return f"img/{hashlib.sha256(content_url.encode()).hexdigest()}.{extension}"
+    return f"{object_path}.{extension}"
+
+
+def _provenance(row: dict) -> dict[str, str]:
+    """R2 custom metadata: which story and message the object belongs to."""
+    parts = row["object_path"].split("/")
+    return {
+        "share_id": parts[1],
+        "message_id": parts[2],
+        "source_url": row["content_url"],
+        "origin_url": row.get("origin_url") or "",
+    }
 
 
 async def copy_pending(
@@ -54,27 +71,48 @@ async def copy_pending(
         max_attempts=MAX_ATTEMPTS,
     )
 
-    # One fetch per URL: the same picture can appear twice in one batch, and
-    # finish_media marks every row with that URL at once.
-    rows_by_url: dict[str, list[str]] = {}
-    for row in claimed:
-        rows_by_url.setdefault(row["content_url"], []).append(row["id"])
-
     copied = failed = 0
-    for url, ids in rows_by_url.items():
+    rows_by_url: dict[str, list[dict]] = {}
+    for row in claimed:
+        if not row.get("object_path"):
+            await repo.fail_media(row["id"], NO_PATH_ERROR, 1)
+            failed += 1
+            continue
+        rows_by_url.setdefault(row["content_url"], []).append(row)
+
+    # One fetch per URL — the same picture can appear twice in one batch — but
+    # each image is stored at its own path.
+    for url, rows in rows_by_url.items():
         try:
             data, raw_type = await fetcher.fetch(url)
             content_type = (raw_type or "").split(";")[0].strip().lower()
-            key = media_key(url, content_type)
-            if key is None:
+            if content_type not in _EXTENSIONS:
                 raise ValueError(f"unsupported content type {content_type or 'missing'}")
             if len(data) > MAX_BYTES:
                 raise ValueError(f"image larger than {MAX_BYTES} bytes")
-            await store.put(key, data, content_type)
-            await repo.finish_media(url, key, content_type)
+            for row in rows:
+                key = media_key(row["object_path"], content_type)
+                await store.put(key, data, content_type, _provenance(row))
+                await repo.finish_media(row["id"], key, content_type)
             copied += 1
         except Exception as exc:  # noqa: BLE001 - any failure is one attempt
-            for media_id in ids:
-                await repo.fail_media(media_id, str(exc)[:300], MAX_ATTEMPTS)
+            for row in rows:
+                await repo.fail_media(row["id"], str(exc)[:300], MAX_ATTEMPTS)
             failed += 1
     return {"copied": copied, "failed": failed}
+
+
+async def retract_story(
+    repo: ConversationRepository, store: MediaStore, share_id: str, owner_email: str
+) -> bool:
+    """Retract the caller's copy of a story, and its images once nobody files it.
+
+    Two people can file the same link, and they share its folder — so the
+    folder goes only when the last copy does. Returns False when the caller had
+    no copy (nothing is deleted).
+    """
+    if not await repo.delete(share_id, owner_email):
+        return False
+    if await repo.get(share_id) is None:
+        await store.delete_prefix(story_prefix(share_id))
+    return True

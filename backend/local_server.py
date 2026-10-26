@@ -57,7 +57,7 @@ from chat_archive.chatgpt.decoder import ChatGptFlightDecoder
 from chat_archive.chatgpt.fetcher import HttpImageFetcher, HttpShareFetcher
 from chat_archive.chatgpt.parser import ChatGptParser
 from chat_archive.local_media_store import DirectoryMediaStore
-from chat_archive.media_copier import copy_pending
+from chat_archive.media_copier import copy_pending, retract_story
 from chat_archive.models import normalize_email
 from chat_archive.serializers import conversation_detail
 from chat_archive.service import ShareService
@@ -274,7 +274,7 @@ class Handler(BaseHTTPRequestHandler):
             if not email:
                 return self._json({"error": "sign-in required"}, 401)
             share_id = path.rsplit("/", 1)[-1]
-            if not asyncio.run(repo.delete(share_id, email)):
+            if not asyncio.run(retract_story(repo, media_store, share_id, email)):
                 return self._json({"error": "You have no filed story with that id"}, 404)
             return self._json({"id": share_id, "retracted": True})
 
@@ -402,7 +402,7 @@ class Handler(BaseHTTPRequestHandler):
     def _bytes(self, data: bytes, content_type: str):
         self.send_response(200)
         self.send_header("Content-Type", content_type)
-        self.send_header("Cache-Control", "public, max-age=31536000, immutable")
+        self.send_header("Cache-Control", "public, max-age=86400")
         self._cors_headers()
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()

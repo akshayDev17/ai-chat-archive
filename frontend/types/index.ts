@@ -113,6 +113,8 @@ export interface MediaImage {
   attempts: number;
   last_error: string | null;
   r2_key: string | null;
+  /** `chat-archives/<share_id>/<message id>/<NN>` — where it lands in R2. */
+  object_path: string | null;
 }
 
 export interface MediaStory {

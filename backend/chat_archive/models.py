@@ -94,6 +94,9 @@ class Message:
     content: str
     sources: list[Source] = field(default_factory=list)
     media: list[Media] = field(default_factory=list)
+    #: ChatGPT's own id for the message. It names the message's folder in R2
+    #: and is stable across re-filings, unlike the message's position.
+    external_id: str = ""
 
 
 @dataclass(frozen=True)

@@ -110,6 +110,7 @@ class ChatGptParser(ConversationParser):
                         content=trimmed,
                         sources=_extract_sources(message, trimmed, shift=lead),
                         media=_extract_media(message, shift=lead),
+                        external_id=str(message.get("id") or node.get("id") or ""),
                     )
                 )
         return messages

@@ -41,7 +41,7 @@ from .auth import CloudflareAccessIdentity
 from .chatgpt.decoder import ChatGptFlightDecoder
 from .chatgpt.parser import ChatGptParser
 from .chatgpt.proxy_fetcher import ProxyImageFetcher, ProxyShareFetcher, make_worker_fetch
-from .media_copier import copy_pending
+from .media_copier import copy_pending, retract_story
 from .r2_media_store import R2MediaStore
 from .repository import D1ConversationRepository
 from .serializers import conversation_detail
@@ -251,9 +251,10 @@ class Default(WorkerEntrypoint):
 
         Scoped to the caller's copy: someone else's copy of the same share link
         is untouched, and a story you never filed is a 404 rather than a 403 —
-        from where you stand, there is nothing of yours there to retract.
+        from where you stand, there is nothing of yours there to retract. Once
+        no copy of the story remains, its R2 folder goes with it.
         """
-        if not await self._repository().delete(share_id, identity.email):
+        if not await retract_story(self._repository(), self._media_store(), share_id, identity.email):
             return _json({"error": "You have no filed story with that id"}, status=404)
         return _json({"id": share_id, "retracted": True})
 
@@ -264,13 +265,11 @@ class Default(WorkerEntrypoint):
         if found is None:
             return _json({"error": "Not found"}, status=404)
         data, content_type = found
-        # Keys are content-addressed, so a key's bytes never change.
+        # Not `immutable`: a key is a place in a story, and re-filing can put a
+        # different picture there.
         return Response(
             data,
-            headers={
-                "content-type": content_type,
-                "cache-control": "public, max-age=31536000, immutable",
-            },
+            headers={"content-type": content_type, "cache-control": "public, max-age=86400"},
         )
 
     async def _desk_media(self, target, method: str, identity) -> Response:

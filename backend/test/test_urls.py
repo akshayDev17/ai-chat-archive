@@ -87,6 +87,21 @@ class TestMediaPaths(unittest.TestCase):
     def test_a_well_formed_key_is_accepted(self):
         self.assertEqual(media_key_of(f"/api/media/{KEY}"), KEY)
 
+    def test_a_per_story_key_is_accepted(self):
+        key = "chat-archives/6adf3276-41cc-83e8-8bb7-669b6f0a4748/47780937-aaaa-bbbb-cccc-0123456789ab/01.jpg"
+        self.assertEqual(media_key_of(f"/api/media/{key}"), key)
+
+    def test_a_per_story_key_cannot_climb_or_nest(self):
+        for bad in (
+            "/api/media/chat-archives/../secret/01.jpg",
+            "/api/media/chat-archives/s1/../../x/01.jpg",
+            "/api/media/chat-archives/s1/m/01.exe",
+            "/api/media/chat-archives/s1/m/extra/01.jpg",
+            "/api/media/chat-archives/s1/m/ab.jpg",
+        ):
+            with self.subTest(path=bad):
+                self.assertIsNone(media_key_of(bad))
+
     def test_a_key_that_escapes_the_img_prefix_is_rejected(self):
         # The key becomes a store path locally; it must never climb out.
         for bad in ("/api/media/../secret", "/api/media/img/../../x.jpg",
