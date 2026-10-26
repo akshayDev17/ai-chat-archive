@@ -22,7 +22,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from chat_archive.urls import (  # noqa: E402
     DEFAULT_AFTER_SIGN_IN,
+    desk_media_target,
     first_param,
+    media_key_of,
     path_of,
     query_of,
     safe_next,
@@ -74,6 +76,35 @@ class TestPathAndQuery(unittest.TestCase):
         # string, decoded by the parser, then refused by the guard.
         query = query_of("https://a.com/s?next=https%3A%2F%2Fevil.example")
         self.assertEqual(safe_next(first_param(query, "next")), DEFAULT_AFTER_SIGN_IN)
+
+
+KEY = "img/" + "a" * 64 + ".jpg"
+
+
+class TestMediaPaths(unittest.TestCase):
+    """The media routes: one public read, and the owner's desk endpoints."""
+
+    def test_a_well_formed_key_is_accepted(self):
+        self.assertEqual(media_key_of(f"/api/media/{KEY}"), KEY)
+
+    def test_a_key_that_escapes_the_img_prefix_is_rejected(self):
+        # The key becomes a store path locally; it must never climb out.
+        for bad in ("/api/media/../secret", "/api/media/img/../../x.jpg",
+                    "/api/media/img/abc.jpg", "/api/media/img/" + "a" * 64 + ".exe",
+                    "/api/sessions/x"):
+            with self.subTest(path=bad):
+                self.assertIsNone(media_key_of(bad))
+
+    def test_desk_media_targets(self):
+        self.assertEqual(desk_media_target("/api/desk/media"), (None, None))
+        self.assertEqual(desk_media_target("/api/desk/media/abc-123"), ("abc-123", None))
+        self.assertEqual(desk_media_target("/api/desk/media/abc-123/retry"), ("abc-123", "retry"))
+        self.assertEqual(desk_media_target("/api/desk/media/abc-123/copy"), ("abc-123", "copy"))
+
+    def test_other_paths_are_not_desk_media(self):
+        for other in ("/api/desk/filings", "/api/desk/media/a/b/c", "/api/desk/media/a/delete"):
+            with self.subTest(path=other):
+                self.assertIsNone(desk_media_target(other))
 
 
 if __name__ == "__main__":

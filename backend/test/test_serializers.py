@@ -18,7 +18,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from chat_archive.models import Conversation, Message, Source  # noqa: E402
+from chat_archive.models import Conversation, Media, Message, Source  # noqa: E402
 from chat_archive.serializers import conversation_detail  # noqa: E402
 
 FLAG = "\U0001f1fa\U0001f1f8"  # 🇺🇸 — one code point pair, four UTF-16 units
@@ -101,6 +101,40 @@ class TestDetailShape(unittest.TestCase):
         self.assertEqual(detail["messages"][0]["sources"], [])
         self.assertEqual(detail["messages"][1]["sources"][0]["url"], "https://e.com/a")
         self.assertEqual(detail["messages"][1]["sources"][0]["spans"], [])
+
+
+class TestMedia(unittest.TestCase):
+    """Images on the wire: where each sits, and a src only once it is in R2."""
+
+    def _media(self, text: str, media: list[Media]):
+        message = Message(role="assistant", content=text, media=media)
+        detail = conversation_detail(Conversation(share_id="x", title="t", messages=[message]))
+        return detail["messages"][0]["media"]
+
+    def test_media_src_only_when_copied(self):
+        tag = '<AsyncImage query="q"/>'
+        wire = self._media(
+            tag + tag,
+            [
+                Media(tag_start=0, ordinal=0, content_url="https://i/1", status="copied", r2_key="img/a.jpg"),
+                Media(tag_start=len(tag), ordinal=0, content_url="https://i/2", status="pending"),
+            ],
+        )
+        self.assertEqual(
+            wire,
+            [
+                {"tag_start": 0, "ordinal": 0, "src": "/api/media/img/a.jpg"},
+                {"tag_start": len(tag), "ordinal": 0, "src": None},
+            ],
+        )
+
+    def test_media_tag_start_is_utf16(self):
+        text = f"{FLAG} Look: <AsyncImage query=\"q\"/>"
+        start = text.index("<AsyncImage")
+        (wire,) = self._media(text, [Media(tag_start=start, ordinal=0, content_url="https://i/1")])
+        # Two astral code points before the tag → two extra UTF-16 units.
+        self.assertEqual(wire["tag_start"], start + 2)
+        self.assertEqual(wire["tag_start"], len(text[:start].encode("utf-16-le")) // 2)
 
 
 if __name__ == "__main__":

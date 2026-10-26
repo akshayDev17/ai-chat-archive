@@ -45,19 +45,24 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import threading
+import time
 import urllib.request
+from datetime import datetime, timezone
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from chat_archive.chatgpt.decoder import ChatGptFlightDecoder
-from chat_archive.chatgpt.fetcher import HttpShareFetcher
+from chat_archive.chatgpt.fetcher import HttpImageFetcher, HttpShareFetcher
 from chat_archive.chatgpt.parser import ChatGptParser
+from chat_archive.local_media_store import DirectoryMediaStore
+from chat_archive.media_copier import copy_pending
 from chat_archive.models import normalize_email
 from chat_archive.serializers import conversation_detail
 from chat_archive.service import ShareService
 from chat_archive.sqlite_repository import SqliteConversationRepository
-from chat_archive.urls import first_param, query_of, safe_next
+from chat_archive.urls import desk_media_target, first_param, media_key_of, query_of, safe_next
 
 DEV_EMAIL = normalize_email(os.environ.get("DEV_EMAIL", ""))
 
@@ -105,6 +110,30 @@ def make_local_fetch():
 
 _DB_PATH = os.environ.get("DB_PATH", str(Path(__file__).resolve().parent / "archive.db"))
 repo = SqliteConversationRepository(_DB_PATH)
+#: Copied images, standing in for the R2 bucket. Git-ignored.
+media_store = DirectoryMediaStore(
+    os.environ.get("MEDIA_DIR", str(Path(__file__).resolve().parent / "media"))
+)
+image_fetcher = HttpImageFetcher()
+
+
+def copy_media(only: tuple[str, str] | None = None) -> dict:
+    """One copier batch — what the Worker's Cron Trigger runs every minute."""
+    return asyncio.run(
+        copy_pending(repo, media_store, image_fetcher, datetime.now(timezone.utc), only=only)
+    )
+
+
+def copy_media_forever(interval: float = 60.0) -> None:
+    """The local stand-in for the `* * * * *` Cron Trigger."""
+    while True:
+        try:
+            result = copy_media()
+            if result["copied"] or result["failed"]:
+                print(f"[media] copied {result['copied']}, failed {result['failed']}")
+        except Exception as exc:  # noqa: BLE001 - the loop must survive one bad run
+            print(f"[media] copier run failed: {exc}")
+        time.sleep(interval)
 service = ShareService(
     fetcher=HttpShareFetcher(make_local_fetch()),
     decoder=ChatGptFlightDecoder(),
@@ -302,6 +331,17 @@ class Handler(BaseHTTPRequestHandler):
                 {"owner": email, "sessions": asyncio.run(repo.list_recent(email))}
             )
 
+        if path.startswith("/api/media/"):
+            # Public, like the story the image belongs to.
+            key = media_key_of(path)
+            found = asyncio.run(media_store.get(key)) if key else None
+            if found is None:
+                return self._json({"error": "not found"}, 404)
+            return self._bytes(*found)
+
+        if desk_media_target(path) is not None:
+            return self._desk_media(path, "GET")
+
         if path.startswith("/api/desk/sessions/"):
             # Did *you* file this story? Mirrors the Worker's `_filed_by`.
             email = self._identity()
@@ -327,6 +367,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/dev/session":
             return self._dev_sign_in()
 
+        if desk_media_target(path) is not None:
+            return self._desk_media(path, "POST")
+
         if path != "/api/desk/ingest":
             return self._json({"error": "not found"}, 404)
 
@@ -349,11 +392,43 @@ class Handler(BaseHTTPRequestHandler):
                     "messages": len(conversation.messages),
                     "report_length": len(conversation.report or ""),
                     "citations": len(conversation.citations),
+                    "images": sum(len(m.media) for m in conversation.messages),
                     "owner": email,
                 }
             )
         except Exception as exc:  # noqa: BLE001 - surface any ingest failure
             self._json({"error": str(exc)}, 400)
+
+    def _bytes(self, data: bytes, content_type: str):
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Cache-Control", "public, max-age=31536000, immutable")
+        self._cors_headers()
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _desk_media(self, path: str, method: str):
+        """The media page's endpoints. Mirrors the Worker's `_desk_media`."""
+        email = self._identity()
+        if not email:
+            return self._json({"error": "sign-in required"}, 401)
+        share_id, action = desk_media_target(path)
+        missing = {"error": "You have no filed story with that id"}
+
+        if share_id is None and method == "GET":
+            return self._json({"filings": asyncio.run(repo.media_summary(email))})
+        if share_id and action is None and method == "GET":
+            story = asyncio.run(repo.media_for(share_id, email))
+            return self._json(story) if story else self._json(missing, 404)
+        if share_id and action == "retry" and method == "POST":
+            reset = asyncio.run(repo.retry_failed_media(share_id, email))
+            return self._json({"reset": reset}) if reset is not None else self._json(missing, 404)
+        if share_id and action == "copy" and method == "POST":
+            if asyncio.run(repo.media_for(share_id, email)) is None:
+                return self._json(missing, 404)
+            return self._json(copy_media(only=(email, share_id)))
+        return self._json({"error": "not found"}, 404)
 
     def log_message(self, *_args):
         pass
@@ -367,4 +442,6 @@ if __name__ == "__main__":
         print(f"  identity : auto-signed-in as {DEV_EMAIL} (DEV_EMAIL is set)")
     else:
         print("  identity : anonymous — sign in at /chat-archives/login to file")
+    print("  media    : copier runs every 60s (the Worker's Cron Trigger)")
+    threading.Thread(target=copy_media_forever, daemon=True).start()
     ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()

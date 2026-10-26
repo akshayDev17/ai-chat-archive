@@ -5,8 +5,150 @@ from __future__ import annotations
 import json
 import uuid
 
-from .models import Citation, Conversation, Message, Source, normalize_email
+from .models import Citation, Conversation, Media, Message, Source, normalize_email
 from .ports import ConversationRepository
+
+# -- media SQL, shared with the SQLite repository -----------------------------
+#
+# Written once so local development cannot drift from D1, the same reason
+# `_sources_by_message` is shared. Each is a single statement; parameters are
+# positional and listed beside each one.
+
+#: (conversation_id, message_seq, tag_start, ordinal, content_url, origin_url,
+#:  status, r2_key, content_type, id)
+MEDIA_INSERT_SQL = (
+    "INSERT INTO media "
+    "(conversation_id, message_seq, tag_start, ordinal, content_url, origin_url, "
+    "status, r2_key, content_type, id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+)
+
+#: (conversation_id,)
+MEDIA_FOR_CONVERSATION_SQL = (
+    "SELECT id, message_seq, tag_start, ordinal, content_url, origin_url, status, "
+    "attempts, last_error, r2_key, content_type FROM media "
+    "WHERE conversation_id = ? ORDER BY message_seq, tag_start, ordinal"
+)
+
+#: (owner_email,)
+MEDIA_SUMMARY_SQL = (
+    "SELECT c.external_id AS id, c.title, COUNT(m.id) AS total, "
+    "SUM(CASE WHEN m.status = 'copied' THEN 1 ELSE 0 END) AS copied, "
+    "SUM(CASE WHEN m.status = 'failed' THEN 1 ELSE 0 END) AS failed, "
+    "SUM(CASE WHEN m.status IN ('pending', 'copying') THEN 1 ELSE 0 END) AS pending "
+    "FROM conversations c JOIN media m ON m.conversation_id = c.id "
+    "WHERE c.owner_email = ? GROUP BY c.id ORDER BY c.created_at DESC"
+)
+
+#: (conversation_id,)
+MEDIA_COUNT_FAILED_SQL = "SELECT COUNT(*) AS n FROM media WHERE conversation_id = ? AND status = 'failed'"
+
+#: (conversation_id,)
+MEDIA_RETRY_SQL = (
+    "UPDATE media SET status = 'pending', attempts = 0, last_error = NULL, claimed_at = NULL "
+    "WHERE conversation_id = ? AND status = 'failed'"
+)
+
+#: (stale_before,)
+MEDIA_RECLAIM_SQL = (
+    "UPDATE media SET status = 'pending', claimed_at = NULL "
+    "WHERE status = 'copying' AND claimed_at < ?"
+)
+
+# One statement, so a claim is atomic: two runs (the cron and a "Copy now")
+# can never both take the same row. Oldest story first, then reading order.
+_MEDIA_CLAIM_SQL = (
+    "UPDATE media SET status = 'copying', claimed_at = ? "
+    "WHERE status = 'pending' AND id IN ("
+    "SELECT m.id FROM media m JOIN conversations c ON c.id = m.conversation_id "
+    "WHERE m.status = 'pending'{scope} "
+    "ORDER BY c.created_at, m.message_seq, m.tag_start, m.ordinal LIMIT ?"
+    ") RETURNING id, content_url"
+)
+#: (now, limit)
+MEDIA_CLAIM_SQL = _MEDIA_CLAIM_SQL.format(scope="")
+#: (now, owner_email, share_id, limit)
+MEDIA_CLAIM_ONE_STORY_SQL = _MEDIA_CLAIM_SQL.format(
+    scope=" AND c.owner_email = ? AND c.external_id = ?"
+)
+
+#: (r2_key, content_type, content_url)
+MEDIA_FINISH_SQL = (
+    "UPDATE media SET status = 'copied', r2_key = ?, content_type = ?, "
+    "last_error = NULL, claimed_at = NULL WHERE content_url = ? AND status != 'copied'"
+)
+
+#: (error, max_attempts, media_id)
+MEDIA_FAIL_SQL = (
+    "UPDATE media SET attempts = attempts + 1, last_error = ?, claimed_at = NULL, "
+    "status = CASE WHEN attempts + 1 >= ? THEN 'failed' ELSE 'pending' END WHERE id = ?"
+)
+
+
+def copied_media_sql(count: int) -> str:
+    """Already-copied images among ``count`` content URLs: (url, url, …)."""
+    marks = ", ".join("?" for _ in range(count))
+    return (
+        "SELECT content_url, r2_key, content_type FROM media "
+        f"WHERE status = 'copied' AND content_url IN ({marks})"
+    )
+
+
+def media_rows_for(conv_id: str, messages: list[Message], copied: dict) -> list[tuple]:
+    """Insert parameters for a conversation's media, carrying copies over.
+
+    ``copied`` maps content_url → (r2_key, content_type) for images already in
+    R2, so re-filing a story — or filing a second story that shows the same
+    picture — never queues a copy that has already been made.
+    """
+    rows = []
+    for seq, message in enumerate(messages):
+        for media in message.media:
+            key, content_type = copied.get(media.content_url, (None, None))
+            rows.append(
+                (
+                    conv_id,
+                    seq,
+                    media.tag_start,
+                    media.ordinal,
+                    media.content_url,
+                    media.origin_url,
+                    "copied" if key else "pending",
+                    key,
+                    content_type,
+                    str(uuid.uuid4()),
+                )
+            )
+    return rows
+
+
+def media_by_message(rows, message_seq: int) -> list[Media]:
+    """The media rows belonging to one message, as models (rows are dict-like)."""
+    return [
+        Media(
+            tag_start=row["tag_start"],
+            ordinal=row["ordinal"],
+            content_url=row["content_url"],
+            origin_url=row["origin_url"] or "",
+            status=row["status"],
+            r2_key=row["r2_key"],
+            content_type=row["content_type"],
+            attempts=row["attempts"],
+            last_error=row["last_error"],
+        )
+        for row in rows
+        if row["message_seq"] == message_seq
+    ]
+
+
+def media_image(row) -> dict:
+    """One image as the media page sees it."""
+    return {
+        key: row[key]
+        for key in (
+            "id", "message_seq", "tag_start", "ordinal", "content_url",
+            "origin_url", "status", "attempts", "last_error", "r2_key",
+        )
+    }
 
 
 def _sources_by_message(rows, message_seq: int) -> list[Source]:
@@ -59,6 +201,14 @@ class D1ConversationRepository(ConversationRepository):
             "SELECT id FROM conversations WHERE owner_email = ? AND external_id = ?"
         ).bind(owner, conversation.share_id).first()
 
+        # Read before the delete below: this story's own copied images are among
+        # the ones a re-filing must not copy again.
+        urls = sorted({m.content_url for msg in conversation.messages for m in msg.media})
+        copied = {}
+        if urls:
+            found = await self._db.prepare(copied_media_sql(len(urls))).bind(*urls).all()
+            copied = {r["content_url"]: (r["r2_key"], r["content_type"]) for r in found.results}
+
         conv_id = existing["id"] if existing else str(uuid.uuid4())
         if existing:
             await self._db.prepare(
@@ -72,6 +222,9 @@ class D1ConversationRepository(ConversationRepository):
             ).bind(conv_id).run()
             await self._db.prepare(
                 "DELETE FROM sources WHERE conversation_id = ?"
+            ).bind(conv_id).run()
+            await self._db.prepare(
+                "DELETE FROM media WHERE conversation_id = ?"
             ).bind(conv_id).run()
         else:
             await self._db.prepare(
@@ -124,6 +277,13 @@ class D1ConversationRepository(ConversationRepository):
         ]
         if source_batch:
             await self._db.batch(source_batch)
+
+        media_stmt = self._db.prepare(MEDIA_INSERT_SQL)
+        media_batch = [
+            media_stmt.bind(*row) for row in media_rows_for(conv_id, conversation.messages, copied)
+        ]
+        if media_batch:
+            await self._db.batch(media_batch)
 
         if conversation.report:
             report_id = str(uuid.uuid4())
@@ -206,7 +366,7 @@ class D1ConversationRepository(ConversationRepository):
         await self._db.batch(
             [
                 self._db.prepare(f"DELETE FROM {table} WHERE conversation_id = ?").bind(conv_id)
-                for table in ("sources", "reports", "messages")
+                for table in ("media", "sources", "reports", "messages")
             ]
             + [self._db.prepare("DELETE FROM conversations WHERE id = ?").bind(conv_id)]
         )
@@ -241,6 +401,7 @@ class D1ConversationRepository(ConversationRepository):
             "SELECT message_seq, seq, kind, title, url, attribution, pub_date, spans "
             "FROM sources WHERE conversation_id = ? ORDER BY message_seq, seq"
         ).bind(row["id"]).all()
+        media_rows = await self._db.prepare(MEDIA_FOR_CONVERSATION_SQL).bind(row["id"]).all()
 
         citations: list[Citation] = []
         if report and report.get("citations"):
@@ -257,6 +418,7 @@ class D1ConversationRepository(ConversationRepository):
                     role=m["role"],
                     content=m["content"],
                     sources=_sources_by_message(source_rows.results, m["seq"]),
+                    media=media_by_message(media_rows.results, m["seq"]),
                 )
                 for m in messages.results
             ],
@@ -264,6 +426,64 @@ class D1ConversationRepository(ConversationRepository):
             citations=citations,
             owner_email=row["owner_email"],
         )
+
+    # -- media ----------------------------------------------------------------
+
+    async def _owned_conversation(self, share_id: str, owner_email: str):
+        owner = normalize_email(owner_email)
+        if not owner:
+            raise ValueError("media operations require an owner_email.")
+        return await self._db.prepare(
+            "SELECT id, title FROM conversations WHERE owner_email = ? AND external_id = ?"
+        ).bind(owner, share_id).first()
+
+    async def media_summary(self, owner_email: str) -> list[dict]:
+        owner = normalize_email(owner_email)
+        if not owner:
+            raise ValueError("media_summary requires an owner_email.")
+        result = await self._db.prepare(MEDIA_SUMMARY_SQL).bind(owner).all()
+        return [dict(r) for r in result.results]
+
+    async def media_for(self, share_id: str, owner_email: str) -> dict | None:
+        conv = await self._owned_conversation(share_id, owner_email)
+        if not conv:
+            return None
+        rows = await self._db.prepare(MEDIA_FOR_CONVERSATION_SQL).bind(conv["id"]).all()
+        return {
+            "id": share_id,
+            "title": conv["title"],
+            "images": [media_image(r) for r in rows.results],
+        }
+
+    async def retry_failed_media(self, share_id: str, owner_email: str) -> int | None:
+        conv = await self._owned_conversation(share_id, owner_email)
+        if not conv:
+            return None
+        failed = await self._db.prepare(MEDIA_COUNT_FAILED_SQL).bind(conv["id"]).first()
+        await self._db.prepare(MEDIA_RETRY_SQL).bind(conv["id"]).run()
+        return failed["n"]
+
+    async def claim_media(
+        self,
+        limit: int,
+        now: str,
+        stale_before: str,
+        only: tuple[str, str] | None = None,
+    ) -> list[dict]:
+        await self._db.prepare(MEDIA_RECLAIM_SQL).bind(stale_before).run()
+        if only:
+            owner, share_id = normalize_email(only[0]), only[1]
+            stmt = self._db.prepare(MEDIA_CLAIM_ONE_STORY_SQL).bind(now, owner, share_id, limit)
+        else:
+            stmt = self._db.prepare(MEDIA_CLAIM_SQL).bind(now, limit)
+        result = await stmt.all()
+        return [{"id": r["id"], "content_url": r["content_url"]} for r in result.results]
+
+    async def finish_media(self, content_url: str, r2_key: str, content_type: str) -> None:
+        await self._db.prepare(MEDIA_FINISH_SQL).bind(r2_key, content_type, content_url).run()
+
+    async def fail_media(self, media_id: str, error: str, max_attempts: int = 3) -> None:
+        await self._db.prepare(MEDIA_FAIL_SQL).bind(error, max_attempts, media_id).run()
 
     @staticmethod
     def _now() -> str:

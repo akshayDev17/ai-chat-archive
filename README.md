@@ -69,12 +69,16 @@ behind it). Locally a dev server stands in for it.
 | `/chat-archives/<share-id>` — one story | **readable** | readable; **Retract** if you filed it |
 | `/chat-archives/login` — sign in | screen | redirects to the desk |
 | `/chat-archives/desk` — file copy | redirected to sign in | the filing form, with **Retract it** on what you just filed |
+| `/chat-archives/desk/media` — your images | redirected to sign in | copy progress per story, **Retry failed**, **Copy now** |
 
 One rule, stated once: **public reads, private writes.** The only gated actions
 are `POST /api/desk/ingest`, `GET /api/desk/filings`, and the retraction pair
 under `/api/desk/sessions/<share-id>`: `GET` answers `{"yours": bool}` so a story
 knows whether to offer the control, and `DELETE` takes your copy out of the edition
 with its transcript, report and sources (404 if you have no copy).
+`/api/desk/media[/<share-id>[/retry|/copy]]` is the media page's API, scoped the
+same way. Images themselves are public at `GET /api/media/<key>`, like the story
+they belong to.
 
 Ownership is still recorded (`conversations.owner_email`). It is *provenance, not
 an access boundary* for reading, with one exception: you can only retract what you

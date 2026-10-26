@@ -12,6 +12,7 @@ exactly once and imported by both.
 
 from __future__ import annotations
 
+import re
 from urllib.parse import parse_qs, urlsplit
 
 #: Where a signed-in visitor lands when ``next`` is absent or rejected.
@@ -55,3 +56,26 @@ def safe_next(raw: str | None) -> str:
     if not raw or not raw.startswith("/") or raw.startswith("//"):
         return DEFAULT_AFTER_SIGN_IN
     return raw
+
+
+#: R2 keys the copier writes: ``img/<sha256 hex>.<ext>``. Anything else is not
+#: ours to serve — and locally a key is a filesystem path, so it must not climb.
+_MEDIA_KEY_RE = re.compile(r"^img/[0-9a-f]{64}\.(?:jpg|png|webp|gif|avif)$")
+
+_DESK_MEDIA_RE = re.compile(r"/api/desk/media(?:/([^/]+)(?:/(retry|copy))?)?$")
+
+
+def media_key_of(path: str) -> str | None:
+    """The key in a public ``/api/media/<key>`` path, if it is a well-formed one."""
+    _, sep, key = path.partition("/api/media/")
+    return key if sep and _MEDIA_KEY_RE.match(key) else None
+
+
+def desk_media_target(path: str) -> tuple[str | None, str | None] | None:
+    """``(share_id, action)`` for the owner's media endpoints, else ``None``.
+
+    ``/api/desk/media`` → ``(None, None)``; ``/api/desk/media/<id>`` →
+    ``(id, None)``; ``/api/desk/media/<id>/retry|copy`` → ``(id, action)``.
+    """
+    match = _DESK_MEDIA_RE.search(path)
+    return (match.group(1), match.group(2)) if match else None

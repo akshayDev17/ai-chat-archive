@@ -1,4 +1,12 @@
-import type { IngestResult, Session, SessionDetail, SessionListResponse, WhoAmI } from '@/types';
+import type {
+  IngestResult,
+  MediaFiling,
+  MediaStory,
+  Session,
+  SessionDetail,
+  SessionListResponse,
+  WhoAmI,
+} from '@/types';
 
 // Point this at the Python Worker's origin (e.g. the local dev server while
 // developing, or the same origin in production once the Worker and the site
@@ -60,6 +68,40 @@ export async function whoami(): Promise<string | null> {
  */
 export function listSessions(): Promise<Session[]> {
   return request<SessionListResponse>('/api/sessions').then((d) => d.sessions);
+}
+
+/**
+ * The media page's reads and actions — your filings' image copies.
+ *
+ * All under `/api/desk/`, so they are signed-in only and scoped to stories you
+ * filed. The copying itself runs in the background (a once-a-minute Cron
+ * Trigger); "Copy now" just runs one batch for one story immediately.
+ */
+export function mediaSummary(): Promise<MediaFiling[]> {
+  return request<{ filings: MediaFiling[] }>('/api/desk/media').then((d) => d.filings);
+}
+
+export function mediaFor(id: string): Promise<MediaStory> {
+  return request<MediaStory>(`/api/desk/media/${encodeURIComponent(id)}`);
+}
+
+/** Put a story's failed images back in the queue; returns how many. */
+export function retryMedia(id: string): Promise<number> {
+  return request<{ reset: number }>(`/api/desk/media/${encodeURIComponent(id)}/retry`, {
+    method: 'POST',
+  }).then((d) => d.reset);
+}
+
+export function copyMediaNow(id: string): Promise<{ copied: number; failed: number }> {
+  return request<{ copied: number; failed: number }>(
+    `/api/desk/media/${encodeURIComponent(id)}/copy`,
+    { method: 'POST' },
+  );
+}
+
+/** Where a copied image is served from (`src` comes from the story payload). */
+export function mediaSrc(src: string): string {
+  return `${API_BASE}${src}`;
 }
 
 /** A single story, public by permalink: no sign-in required. */

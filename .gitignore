@@ -45,3 +45,7 @@ next-env.d.ts
 *.log
 *.db
 *.sqlite3
+
+# Images the local server's copier stores — the local stand-in for the R2
+# bucket. Re-copied from images.openai.com on demand.
+backend/media/

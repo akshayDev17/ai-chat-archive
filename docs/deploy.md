@@ -199,25 +199,33 @@ copy, and it belongs on the external drive.
 
 ---
 
-## 3. Data: R2 — not yet
+## 3. Data: R2 — GenUI images
 
-**Nothing in the codebase reads or writes R2.** It is in `plan.md` and unwired,
-and creating it now would be a bucket nothing touches and — on the free plan — a
-checkout flow to complete.
+The Worker binds the bucket **`ai-chat-archive-media`** as `MEDIA`. It holds the
+images ChatGPT's GenUI replies show (`<AsyncImage/>`, `<AsyncImageGroup/>`),
+copied out of `images.openai.com` so a story keeps its pictures. Keys are
+`img/<sha256(content_url)>.<ext>`; the Worker serves them publicly at
+`/api/media/<key>` with an immutable cache header.
 
-Its first real use is already identified: **favicons, fetched once at ingest and
-stored**, instead of asking a third party for them on every page load (see
-`docs/sources.md`). Provision it when that work starts.
+Copying is asynchronous. Filing records each image as a `pending` row in the
+`media` table (migration `0002_media.sql`); a Cron Trigger (`* * * * *`, see
+`wrangler.jsonc`) copies ten per run through the Deno fetch proxy — the Free
+plan allows 50 subrequests per invocation, and one story has shown 28 images.
+The filer watches and controls it at `/chat-archives/desk/media`.
 
-When it does:
+One-time setup, before the first deploy that binds it:
 
-```bash
-npx wrangler r2 bucket create ai-chat-archive-media
-```
+1. **Enable R2** on the account: dashboard → R2 → purchase the free plan. It asks
+   for a payment method; usage inside the free tier costs $0.
+2. **Create the bucket:**
 
-```jsonc
-"r2_buckets": [{ "binding": "MEDIA", "bucket_name": "ai-chat-archive-media" }]
-```
+   ```bash
+   npx wrangler r2 bucket create ai-chat-archive-media
+   ```
+
+3. **Give the CI token R2:** API tokens → edit → add `Account · Workers R2
+   Storage · Edit`. The "Check the R2 bucket exists" CI step fails with a
+   pointed message until 1–3 are done.
 
 Free tier: 10 GB-month storage, 1 million Class A operations, 10 million Class B,
 and **egress is free** — "Egressing directly from R2, including via the Workers

@@ -45,10 +45,22 @@ export interface Source {
   spans: [number, number][];
 }
 
+/**
+ * An image a GenUI component shows. `tag_start` is the UTF-16 offset of the
+ * component's tag in the message text — how the reader puts it back in place.
+ * `src` is set only once the image has been copied into the archive's storage.
+ */
+export interface MediaItem {
+  tag_start: number;
+  ordinal: number;
+  src: string | null;
+}
+
 export interface Message {
   role: string;
   content: string;
   sources: Source[];
+  media?: MediaItem[];
 }
 
 export interface Citation {
@@ -73,4 +85,38 @@ export interface IngestResult {
   messages: number;
   report_length: number;
   citations: number;
+  /** Images found in GenUI replies, queued for copying. */
+  images: number;
+}
+
+/** One filing's image-copy progress, as the media page lists it. */
+export interface MediaFiling {
+  id: string;
+  title: string;
+  total: number;
+  copied: number;
+  failed: number;
+  /** Still waiting or mid-copy. */
+  pending: number;
+}
+
+export type MediaStatus = 'pending' | 'copying' | 'copied' | 'failed';
+
+export interface MediaImage {
+  id: string;
+  message_seq: number;
+  tag_start: number;
+  ordinal: number;
+  content_url: string;
+  origin_url: string;
+  status: MediaStatus;
+  attempts: number;
+  last_error: string | null;
+  r2_key: string | null;
+}
+
+export interface MediaStory {
+  id: string;
+  title: string;
+  images: MediaImage[];
 }

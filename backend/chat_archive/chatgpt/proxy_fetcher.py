@@ -16,7 +16,7 @@ from __future__ import annotations
 from typing import Any, Awaitable, Callable
 from urllib.parse import quote
 
-from ..ports import ShareFetcher
+from ..ports import ImageFetcher, ShareFetcher
 from .fetcher import DEFAULT_USER_AGENT, FetchError
 
 FetchCallable = Callable[..., Awaitable[Any]]
@@ -54,6 +54,36 @@ class ProxyShareFetcher(ShareFetcher):
         if status != 200:
             raise FetchError(f"proxy fetch failed: HTTP {status}")
         return await response.text()
+
+
+
+class ProxyImageFetcher(ImageFetcher):
+    """Fetch a GenUI image (``images.openai.com``) through the same Deno proxy.
+
+    ``images.openai.com`` sits on Cloudflare like chatgpt.com, and the block on
+    Worker subrequests keys on ``cf.worker.upstream_zone`` (see
+    ``docs/worker-fetch-block.md``), so the Worker is planned to be refused there
+    too. The proxy returns the image bytes with the upstream ``content-type``.
+    """
+
+    def __init__(self, fetch_func: FetchCallable, proxy_base_url: str, token: str,
+                 user_agent: str = DEFAULT_USER_AGENT):
+        self._fetch = fetch_func
+        self._proxy_base_url = proxy_base_url.rstrip("/")
+        self._token = token
+        self._user_agent = user_agent
+
+    async def fetch(self, url: str) -> tuple[bytes, str]:
+        response = await self._fetch(
+            f"{self._proxy_base_url}/?u={quote(url, safe='')}",
+            headers={"x-fetch-token": self._token, "user-agent": self._user_agent},
+            redirect="follow",
+        )
+        status = getattr(response, "status", None)
+        if status != 200:
+            raise FetchError(f"proxy fetch failed: HTTP {status}")
+        data = (await response.arrayBuffer()).to_bytes()
+        return data, response.headers.get("content-type") or ""
 
 
 def make_worker_fetch() -> FetchCallable:
