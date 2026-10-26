@@ -27,6 +27,7 @@ from chat_archive.local_media_store import DirectoryMediaStore, MemoryMediaStore
 from chat_archive.local_repository import MemoryConversationRepository  # noqa: E402
 from chat_archive.media_copier import MAX_BYTES, copy_pending, media_key  # noqa: E402
 from chat_archive.models import Conversation, Media, Message  # noqa: E402
+from chat_archive.r2_media_store import R2MediaStore  # noqa: E402
 
 OWNER = "akshay@example.com"
 NOW = datetime(2026, 10, 26, 12, 0, tzinfo=timezone.utc)
@@ -210,6 +211,45 @@ class DirectoryStoreTests(unittest.TestCase):
 
             self.assertEqual(asyncio.run(store.get("img/abc.png")), (b"png!", "image/png"))
             self.assertIsNone(asyncio.run(store.get("img/missing.png")))
+
+
+class R2ReadTests(unittest.TestCase):
+    """Reading an object back from R2, as the Workers Python SDK delivers it.
+
+    The SDK wraps the R2 binding (`_BindingWrapper`) and converts every result:
+    `arrayBuffer()` comes back as a Python memoryview, not a JS buffer, and
+    `httpMetadata` as an attribute-dict. The first version called
+    `.to_bytes()` on it and every image request died with error 1101.
+    """
+
+    def bucket(self, buffer, metadata):
+        class Found:
+            httpMetadata = metadata
+
+            async def arrayBuffer(self):
+                return buffer
+
+        class Bucket:
+            async def get(self, key):
+                return Found() if key == "img/a.jpg" else None
+
+        return Bucket()
+
+    def test_the_sdk_wrapped_shape_memoryview(self):
+        store = R2MediaStore(self.bucket(memoryview(JPEG), SimpleNamespace(contentType="image/jpeg")))
+        self.assertEqual(asyncio.run(store.get("img/a.jpg")), (JPEG, "image/jpeg"))
+
+    def test_a_raw_js_buffer_shape_still_works(self):
+        class JsBuffer:
+            def to_bytes(self):
+                return JPEG
+
+        store = R2MediaStore(self.bucket(JsBuffer(), SimpleNamespace(contentType="image/png")))
+        self.assertEqual(asyncio.run(store.get("img/a.jpg")), (JPEG, "image/png"))
+
+    def test_a_missing_object_is_none(self):
+        store = R2MediaStore(self.bucket(memoryview(JPEG), None))
+        self.assertIsNone(asyncio.run(store.get("img/missing.jpg")))
 
 
 if __name__ == "__main__":
