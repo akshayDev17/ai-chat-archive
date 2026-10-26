@@ -237,6 +237,27 @@ class SqliteConversationRepository(ConversationRepository):
 
             self._conn.commit()
 
+    async def delete(self, share_id: str, owner_email: str) -> bool:
+        owner = normalize_email(owner_email)
+        if not owner:
+            raise ValueError("delete requires an owner_email.")
+
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT id FROM conversations WHERE owner_email = ? AND external_id = ?",
+                (owner, share_id),
+            ).fetchone()
+            if not row:
+                return False
+
+            conv_id = row[0]
+            self._conn.execute("DELETE FROM sources WHERE conversation_id = ?", (conv_id,))
+            self._conn.execute("DELETE FROM reports WHERE conversation_id = ?", (conv_id,))
+            self._conn.execute("DELETE FROM messages WHERE conversation_id = ?", (conv_id,))
+            self._conn.execute("DELETE FROM conversations WHERE id = ?", (conv_id,))
+            self._conn.commit()
+        return True
+
     async def get(self, share_id: str, owner_email: str | None = None) -> Conversation | None:
         owner = normalize_email(owner_email)
 

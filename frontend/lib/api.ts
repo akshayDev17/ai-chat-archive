@@ -76,6 +76,24 @@ export function ingestSession(shareUrl: string): Promise<IngestResult> {
 }
 
 /**
+ * Whether the signed-in reader filed this story — i.e. whether to offer them a
+ * retraction. `false` for anyone else, and for anonymous visitors: Access
+ * bounces their `/api/desk/` call (or it 401s), which is the same answer.
+ */
+export function isFiledByYou(id: string): Promise<boolean> {
+  return request<{ yours: boolean }>(`/api/desk/sessions/${encodeURIComponent(id)}`)
+    .then((d) => d.yours)
+    .catch(() => false);
+}
+
+/** Take one of your own stories out of the edition. Someone else's copy stays. */
+export function retractSession(id: string): Promise<void> {
+  return request<{ retracted: boolean }>(`/api/desk/sessions/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  }).then(() => undefined);
+}
+
+/**
  * Whether a real sign-in provider is wired up yet.
  *
  * It is not: the one-time-PIN provider is still undecided (Cloudflare sending

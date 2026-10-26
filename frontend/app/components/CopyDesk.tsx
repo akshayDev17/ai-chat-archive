@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { ingestSession, isSignInRequired, signOut, whoami } from '@/lib/api';
 import { AFTER_SIGN_IN, AFTER_SIGN_OUT } from '@/lib/nav';
+import Retract from './Retract';
 
 /**
  * The copy desk: where a share link becomes a story in the paper.
@@ -95,7 +96,13 @@ export default function CopyDesk() {
 function FileSession() {
   const [url, setUrl] = useState('');
   const [busy, setBusy] = useState(false);
-  const [note, setNote] = useState<{ text: string; tone: 'ok' | 'warn' | 'error' } | null>(null);
+  const [note, setNote] = useState<{
+    text: string;
+    tone: 'ok' | 'warn' | 'error';
+    /** The story this note announces, so it can be retracted from here. */
+    filed?: { id: string; title: string };
+  } | null>(null);
+  const filed = note?.filed;
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -105,6 +112,7 @@ function FileSession() {
       const result = await ingestSession(url);
       setUrl('');
       setNote({
+        filed: { id: result.share_id, title: result.title },
         // A filed session with no report is not a failure — the transcript is
         // there and the story is in the edition — but it is not what was asked
         // for either, and staying quiet about it is how a missing report went
@@ -160,7 +168,28 @@ function FileSession() {
         role="status"
       >
         {note ? (
-          note.text
+          <>
+            {note.text}
+            {/* The wrong link, or a share made before the report was written:
+                both are noticed here, the moment the filing lands, so the way
+                to take it back sits right beside the news. */}
+            {filed ? (
+              <>
+                {' '}
+                <Retract
+                  key={filed.id}
+                  id={filed.id}
+                  label="Retract it"
+                  onRetracted={() =>
+                    setNote({
+                      text: `“${filed.title}” was retracted — it is out of the edition.`,
+                      tone: 'ok',
+                    })
+                  }
+                />
+              </>
+            ) : null}
+          </>
         ) : (
           <>
             In the ChatGPT share dialog, choose <em>Share link</em> and paste it here.

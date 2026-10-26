@@ -188,6 +188,30 @@ class D1ConversationRepository(ConversationRepository):
         ).bind(owner, limit).all()
         return list(result.results)
 
+    async def delete(self, share_id: str, owner_email: str) -> bool:
+        owner = normalize_email(owner_email)
+        if not owner:
+            raise ValueError("delete requires an owner_email.")
+
+        row = await self._db.prepare(
+            "SELECT id FROM conversations WHERE owner_email = ? AND external_id = ?"
+        ).bind(owner, share_id).first()
+        if not row:
+            return False
+
+        # One batch, because a D1 batch is a transaction: a retraction that
+        # failed halfway would leave a story with no transcript in the edition.
+        # Children first — nothing cascades (see migrations/0001_init.sql).
+        conv_id = row["id"]
+        await self._db.batch(
+            [
+                self._db.prepare(f"DELETE FROM {table} WHERE conversation_id = ?").bind(conv_id)
+                for table in ("sources", "reports", "messages")
+            ]
+            + [self._db.prepare("DELETE FROM conversations WHERE id = ?").bind(conv_id)]
+        )
+        return True
+
     async def get(self, share_id: str, owner_email: str | None = None) -> Conversation | None:
         owner = normalize_email(owner_email)
 

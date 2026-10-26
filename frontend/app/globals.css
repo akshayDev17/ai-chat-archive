@@ -668,6 +668,57 @@ body {
 
 .back:hover { color: var(--accent); }
 
+/* "← All sessions" on the left, the filer's Retract on the right. The row takes
+   over `.back`'s bottom margin so the headline sits where it always did. */
+.reader-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--s2) var(--s4);
+  margin-bottom: var(--s5);
+}
+
+.reader-top .back { margin-bottom: 0; }
+
+/* Retract: the same quiet mono micro-caps as Sign out — it is an editor's
+   correction, not something the page should shout about. Only the confirming
+   click turns red. */
+.retract,
+.retract-confirm {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.retract {
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  transition: color 0.12s ease;
+}
+
+.retract:hover { color: var(--accent); }
+.retract.danger { color: #b00020; }
+.retract.danger:hover { color: var(--ink); }
+.retract:disabled { cursor: default; opacity: 0.6; }
+
+.retract-confirm {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--s3);
+}
+
+.retract-error {
+  color: #b00020;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
 .rtoggle {
   display: inline-flex;
   border: 1px solid var(--ink);

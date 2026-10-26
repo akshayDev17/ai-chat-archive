@@ -37,6 +37,12 @@ class MemoryConversationRepository(ConversationRepository):
                 return conversation
         return None
 
+    async def delete(self, share_id: str, owner_email: str) -> bool:
+        owner = normalize_email(owner_email)
+        if not owner:
+            raise ValueError("delete requires an owner_email.")
+        return self._by_key.pop((owner, share_id), None) is not None
+
     async def list_all(self, limit: int = 200) -> list[dict]:
         """The public edition: every filed story, newest first, no owner filter."""
         return self._rows(list(reversed(list(self._by_key.items()))), limit)

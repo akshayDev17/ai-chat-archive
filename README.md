@@ -66,15 +66,19 @@ behind it). Locally a dev server stands in for it.
 | Route | Anyone | Signed in |
 |---|---|---|
 | `/chat-archives` — the edition | **every filed story** | same |
-| `/chat-archives/<share-id>` — one story | **readable** | readable |
+| `/chat-archives/<share-id>` — one story | **readable** | readable; **Retract** if you filed it |
 | `/chat-archives/login` — sign in | screen | redirects to the desk |
-| `/chat-archives/desk` — file copy | redirected to sign in | the filing form |
+| `/chat-archives/desk` — file copy | redirected to sign in | the filing form, with **Retract it** on what you just filed |
 
 One rule, stated once: **public reads, private writes.** The only gated actions
-are `POST /api/desk/ingest` and `GET /api/desk/filings`.
+are `POST /api/desk/ingest`, `GET /api/desk/filings`, and the retraction pair
+under `/api/desk/sessions/<share-id>`: `GET` answers `{"yours": bool}` so a story
+knows whether to offer the control, and `DELETE` takes your copy out of the edition
+with its transcript, report and sources (404 if you have no copy).
 
-Ownership is still recorded (`conversations.owner_email`) but it is *provenance,
-not an access boundary*, and it never leaves the server on a read: it keys the
+Ownership is still recorded (`conversations.owner_email`). It is *provenance, not
+an access boundary* for reading, with one exception: you can only retract what you
+filed, and another filer's copy of the same link stays put. It never leaves the server on a read: it keys the
 upsert, scopes the desk's "your recent filings" query, and is returned by exactly
 one endpoint — `/api/desk/whoami`, to the person it belongs to. No listing carries an
 address, because `/api/sessions` answers anonymous visitors and a per-row address

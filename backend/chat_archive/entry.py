@@ -12,8 +12,9 @@ Two things this file has to get right:
 
 2. **Public reading, private filing.** The archive is a newspaper: the front
    page and every story are readable by anyone, with no identity at all. The
-   only gated actions are filing copy (``POST /api/desk/ingest``) and seeing your own
-   filings. So the split is "public reads, private writes" — one rule, easy to
+   only gated actions are filing copy (``POST /api/desk/ingest``), retracting it
+   (``DELETE /api/desk/sessions/<id>``) and seeing your own filings. So the
+   split is "public reads, private writes" — one rule, easy to
    check, and expressed as two contiguous blocks in :meth:`Default.fetch`.
 
    That split is enforced here, in the Worker, rather than in Cloudflare Access,
@@ -24,8 +25,9 @@ Two things this file has to get right:
 
    Ownership survives as *provenance*: every row records who filed it, which
    drives the `source`/byline on the front page and the copy desk's "your
-   filings" list. It is no longer an access boundary, because there is no longer
-   a boundary to draw — everyone reads the same edition.
+   filings" list. It is not a boundary on *reading* — everyone reads the same
+   edition — but it is the boundary on retracting: you can only take back what
+   you filed.
 """
 
 from __future__ import annotations
@@ -118,6 +120,12 @@ class Default(WorkerEntrypoint):
         if path.endswith("/api/desk/ingest") and method == "POST":
             return await self._ingest(request, identity)
 
+        if "/api/desk/sessions/" in path and method == "GET":
+            return await self._filed_by(path.rsplit("/", 1)[-1], identity)
+
+        if "/api/desk/sessions/" in path and method == "DELETE":
+            return await self._retract(path.rsplit("/", 1)[-1], identity)
+
         if path.endswith("/api/desk/enter"):
             return self._session_start(request)
 
@@ -186,6 +194,26 @@ class Default(WorkerEntrypoint):
         """
         sessions = await self._repository().list_recent(identity.email)
         return _json({"owner": identity.email, "sessions": sessions})
+
+    async def _filed_by(self, share_id: str, identity) -> Response:
+        """Whether *you* filed this story — so the reader knows to offer a retraction.
+
+        A yes/no rather than the owner's address: the story itself is public,
+        and the answer is only ever about the person asking.
+        """
+        mine = await self._repository().get(share_id, identity.email)
+        return _json({"id": share_id, "yours": mine is not None})
+
+    async def _retract(self, share_id: str, identity) -> Response:
+        """Take one of your own stories out of the edition.
+
+        Scoped to the caller's copy: someone else's copy of the same share link
+        is untouched, and a story you never filed is a 404 rather than a 403 —
+        from where you stand, there is nothing of yours there to retract.
+        """
+        if not await self._repository().delete(share_id, identity.email):
+            return _json({"error": "You have no filed story with that id"}, status=404)
+        return _json({"id": share_id, "retracted": True})
 
     async def _read_story(self, share_id: str) -> Response:
         conversation = await self._repository().get(share_id)

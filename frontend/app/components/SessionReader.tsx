@@ -2,15 +2,16 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
-import { getSession } from '@/lib/api';
+import { getSession, isFiledByYou } from '@/lib/api';
 import { linkifyCitations } from '@/lib/citations';
 import { splitMention, toChatItems } from '@/lib/chat';
 import { vendorLabel, vendorMark } from '@/lib/vendors';
 import type { SessionDetail, Source } from '@/types';
+import Retract from './Retract';
 import SourcesPanel from './SourcesPanel';
 
 export type ReaderMode = 'report' | 'chat';
@@ -81,9 +82,13 @@ export default function SessionReader({
   initialMode: ReaderMode;
 }) {
   const pathname = usePathname();
+  const router = useRouter();
   const [session, setSession] = useState<SessionDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<ReaderMode>(initialMode);
+  // Whether the reader filed this story, and so may retract it. Starts false
+  // and stays false for everyone else, so the control never flashes.
+  const [yours, setYours] = useState(false);
   // Which reply's sources drawer is open. One at a time — two drawers would
   // just stack, and the index is kept so the `···` that opened it can show it
   // is the active one.
@@ -95,6 +100,7 @@ export default function SessionReader({
     getSession(id)
       .then(setSession)
       .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load session'));
+    isFiledByYou(id).then(setYours);
   }, [id]);
 
   const report = useMemo(
@@ -138,9 +144,12 @@ export default function SessionReader({
 
   return (
     <article className="reader">
-      <Link href="/chat-archives" className="back">
-        ← All sessions
-      </Link>
+      <div className="reader-top">
+        <Link href="/chat-archives" className="back">
+          ← All sessions
+        </Link>
+        {yours ? <Retract id={id} onRetracted={() => router.push('/chat-archives')} /> : null}
+      </div>
 
       <div className="kicker">{mode === 'report' ? 'The report' : 'The transcript'}</div>
       <h1 className="hl">{session.title}</h1>

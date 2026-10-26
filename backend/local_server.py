@@ -12,7 +12,8 @@ It reuses the exact same ports / service / parser / decoder / router semantics
 as the Worker, so what runs here is the real backend logic, just wired to local
 stand-ins. The public-read / private-filing split is enforced identically:
 ``GET /api/sessions`` and ``GET /api/sessions/<id>`` are open to anyone, while
-``POST /api/desk/ingest`` and ``GET /api/desk/filings`` are 401 without an identity.
+``POST /api/desk/ingest``, ``GET /api/desk/filings`` and ``GET``/``DELETE
+/api/desk/sessions/<id>`` are 401 without an identity.
 
 Identity, in precedence order:
 
@@ -230,12 +231,24 @@ class Handler(BaseHTTPRequestHandler):
         self._cors_preflight()
 
     def do_DELETE(self):
-        """Sign out locally."""
-        if self.path.split("?", 1)[0].rstrip("/") == "/api/dev/session":
+        """Sign out locally, or retract one of your own stories."""
+        path = self.path.split("?", 1)[0].rstrip("/")
+
+        if path == "/api/dev/session":
             return self._json(
                 {"email": None},
                 cookies=[f"{DEV_COOKIE}=; Path=/; Max-Age=0; SameSite=Lax"],
             )
+
+        if path.startswith("/api/desk/sessions/"):
+            email = self._identity()
+            if not email:
+                return self._json({"error": "sign-in required"}, 401)
+            share_id = path.rsplit("/", 1)[-1]
+            if not asyncio.run(repo.delete(share_id, email)):
+                return self._json({"error": "You have no filed story with that id"}, 404)
+            return self._json({"id": share_id, "retracted": True})
+
         self._json({"error": "not found"}, 404)
 
     def do_GET(self):
@@ -288,6 +301,15 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(
                 {"owner": email, "sessions": asyncio.run(repo.list_recent(email))}
             )
+
+        if path.startswith("/api/desk/sessions/"):
+            # Did *you* file this story? Mirrors the Worker's `_filed_by`.
+            email = self._identity()
+            if not email:
+                return self._json({"error": "sign-in required"}, 401)
+            share_id = path.rsplit("/", 1)[-1]
+            mine = asyncio.run(repo.get(share_id, email))
+            return self._json({"id": share_id, "yours": mine is not None})
 
         if path.startswith("/api/sessions/"):
             # Public: a story is readable by permalink with no identity.

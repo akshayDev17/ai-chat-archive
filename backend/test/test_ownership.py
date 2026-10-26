@@ -31,7 +31,7 @@ BACKEND = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND))
 
 from chat_archive.local_repository import MemoryConversationRepository  # noqa: E402
-from chat_archive.models import Conversation, Message  # noqa: E402
+from chat_archive.models import Conversation, Message, Source  # noqa: E402
 from chat_archive.repository import D1ConversationRepository  # noqa: E402
 from chat_archive.sqlite_repository import SqliteConversationRepository  # noqa: E402
 
@@ -241,6 +241,82 @@ class OwnershipContract:
     def test_an_empty_edition_is_an_empty_list_not_an_error(self):
         self.assertEqual(asyncio.run(self.repo.list_all()), [])
 
+    # -- retracting is yours alone -------------------------------------------
+
+    def test_retracting_removes_the_story_from_the_edition(self):
+        asyncio.run(self.repo.upsert(conversation("share-a", "Filed by mistake", AKSHAY)))
+        asyncio.run(self.repo.upsert(conversation("share-b", "Keeper", AKSHAY)))
+
+        self.assertTrue(asyncio.run(self.repo.delete("share-a", AKSHAY)))
+
+        self.assertEqual([s["id"] for s in asyncio.run(self.repo.list_all())], ["share-b"])
+        self.assertEqual([s["id"] for s in asyncio.run(self.repo.list_recent(AKSHAY))], ["share-b"])
+        self.assertIsNone(asyncio.run(self.repo.get("share-a")))
+
+    def test_nobody_can_retract_someone_elses_story(self):
+        asyncio.run(self.repo.upsert(conversation("share-a", "Akshay's story", AKSHAY)))
+
+        self.assertFalse(asyncio.run(self.repo.delete("share-a", GUEST)))
+        self.assertIsNotNone(asyncio.run(self.repo.get("share-a", AKSHAY)))
+
+    def test_retracting_a_shared_link_leaves_the_other_filers_copy(self):
+        asyncio.run(self.repo.upsert(conversation("shared-id", "As Akshay saw it", AKSHAY)))
+        asyncio.run(self.repo.upsert(conversation("shared-id", "As the guest saw it", GUEST)))
+
+        self.assertTrue(asyncio.run(self.repo.delete("shared-id", AKSHAY)))
+
+        self.assertIsNone(asyncio.run(self.repo.get("shared-id", AKSHAY)))
+        self.assertEqual(asyncio.run(self.repo.get("shared-id")).title, "As the guest saw it")
+
+    def test_retracting_what_was_never_filed_reports_false(self):
+        self.assertFalse(asyncio.run(self.repo.delete("no-such-share", AKSHAY)))
+
+    def test_a_retracted_link_can_be_filed_again(self):
+        """The fix for a filing that came in without its report: retract, re-file."""
+        asyncio.run(self.repo.upsert(conversation("share-a", "No report yet", AKSHAY)))
+        asyncio.run(self.repo.delete("share-a", AKSHAY))
+        asyncio.run(self.repo.upsert(conversation("share-a", "With the report", AKSHAY)))
+
+        story = asyncio.run(self.repo.get("share-a", AKSHAY))
+        self.assertEqual(story.title, "With the report")
+        self.assertEqual(len(story.messages), 2)
+
+    def test_delete_requires_an_owner(self):
+        # Same reasoning as list_recent: a lost identity must fail loudly, never
+        # become an unscoped delete.
+        asyncio.run(self.repo.upsert(conversation("share-a", "Story", AKSHAY)))
+        with self.assertRaises(ValueError):
+            asyncio.run(self.repo.delete("share-a", ""))
+        self.assertIsNotNone(asyncio.run(self.repo.get("share-a")))
+
+
+class NoOrphanedRows:
+    """For the SQL repositories: a retraction takes its child rows with it.
+
+    The schema declares ``REFERENCES conversations(id)`` but no ``ON DELETE
+    CASCADE`` (and SQLite does not enforce foreign keys by default anyway), so
+    the repository has to delete messages, reports and sources itself. Anything
+    it forgets is dead weight that no read can ever reach.
+
+    Subclasses supply ``count_rows(table)``.
+    """
+
+    def test_retracting_leaves_no_orphaned_rows(self):
+        story = conversation("share-a", "Story", AKSHAY)
+        story.messages[1].sources.append(
+            Source(index=1, kind="cite", title="A page", url="https://example.com",
+                   attribution="example.com", pub_date=None, spans=((0, 1),))
+        )
+        asyncio.run(self.repo.upsert(story))
+        asyncio.run(self.repo.upsert(conversation("share-b", "Keeper", AKSHAY)))
+
+        asyncio.run(self.repo.delete("share-a", AKSHAY))
+
+        self.assertEqual(self.count_rows("conversations"), 1)
+        self.assertEqual(self.count_rows("messages"), 2)  # share-b's two
+        self.assertEqual(self.count_rows("reports"), 1)
+        self.assertEqual(self.count_rows("sources"), 0)
+
 
 # ------------------------------------------------------------ implementations
 
@@ -250,19 +326,25 @@ class TestMemoryRepository(OwnershipContract, unittest.TestCase):
         return MemoryConversationRepository()
 
 
-class TestSqliteRepository(OwnershipContract, unittest.TestCase):
+class TestSqliteRepository(OwnershipContract, NoOrphanedRows, unittest.TestCase):
     def make_repository(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
         return SqliteConversationRepository(str(Path(self._tmp.name) / "archive.db"))
 
+    def count_rows(self, table: str) -> int:
+        return self.repo._conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
 
-class TestD1Repository(OwnershipContract, unittest.TestCase):
+
+class TestD1Repository(OwnershipContract, NoOrphanedRows, unittest.TestCase):
     """Runs the D1 repository's real SQL against a SQLite-backed fake binding."""
 
     def make_repository(self):
         self._d1 = FakeD1(BACKEND / "migrations" / "0001_init.sql")
         return D1ConversationRepository(self._d1)
+
+    def count_rows(self, table: str) -> int:
+        return self._d1._conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
 
 
 # ------------------------------------------------------------ schema migration

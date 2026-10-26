@@ -71,6 +71,16 @@ class ConversationRepository(ABC):
         """One reader's own filings, newest first — what the copy desk shows back."""
 
     @abstractmethod
+    async def delete(self, share_id: str, owner_email: str) -> bool:
+        """Retract one reader's copy of a story, with its messages, report and sources.
+
+        The one place ownership *is* an access boundary: you can only take back
+        what you filed. Another filer's copy of the same share link stays in the
+        edition. Returns False when this reader has no copy to retract, and
+        raises on an empty owner rather than deleting unscoped.
+        """
+
+    @abstractmethod
     async def get(self, share_id: str, owner_email: str | None = None) -> Conversation | None:
         """Return one conversation (messages + report), or None if absent.
 
