@@ -105,14 +105,29 @@ async def copy_pending(
 async def retract_story(
     repo: ConversationRepository, store: MediaStore, share_id: str, owner_email: str
 ) -> bool:
-    """Retract the caller's copy of a story, and its images once nobody files it.
+    """Retract the caller's copy of a story and free its images in R2.
 
-    Two people can file the same link, and they share its folder — so the
-    folder goes only when the last copy does. Returns False when the caller had
-    no copy (nothing is deleted).
+    D1: the story's rows go (``repo.delete``). R2, two kinds of object:
+
+    - its folder ``chat-archives/<share_id>/`` — deleted once nobody files the
+      link any more (two people can file one link, and they share its folder);
+    - images copied before per-story folders, named on its rows (``img/…``) —
+      deleted unless another story's rows still point at them, since those old
+      keys were shared between stories showing the same picture.
+
+    Returns False when the caller had no copy (nothing is deleted).
     """
+    prefix = story_prefix(share_id)
+    story = await repo.media_for(share_id, owner_email)
     if not await repo.delete(share_id, owner_email):
         return False
     if await repo.get(share_id) is None:
-        await store.delete_prefix(story_prefix(share_id))
+        await store.delete_prefix(prefix)
+    old_keys = sorted({
+        image["r2_key"] for image in (story or {}).get("images", [])
+        if image["r2_key"] and not image["r2_key"].startswith(prefix)
+    })
+    if old_keys:
+        still_used = await repo.referenced_keys(old_keys)
+        await store.delete_keys([key for key in old_keys if key not in still_used])
     return True

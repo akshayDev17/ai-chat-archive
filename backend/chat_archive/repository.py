@@ -86,6 +86,11 @@ MEDIA_CLAIM_ONE_STORY_SQL = _MEDIA_CLAIM_SQL.format(
     scope=" AND c.owner_email = ? AND c.external_id = ?"
 )
 
+#: (json.dumps(r2_keys),) — which of these keys rows still point at.
+REFERENCED_KEYS_SQL = (
+    "SELECT DISTINCT r2_key FROM media WHERE r2_key IN (SELECT value FROM json_each(?))"
+)
+
 #: (r2_key, content_type, media_id)
 MEDIA_FINISH_SQL = (
     "UPDATE media SET status = 'copied', r2_key = ?, content_type = ?, "
@@ -533,6 +538,12 @@ class D1ConversationRepository(ConversationRepository):
 
     async def fail_media(self, media_id: str, error: str, max_attempts: int = 3) -> None:
         await self._db.prepare(MEDIA_FAIL_SQL).bind(error, max_attempts, media_id).run()
+
+    async def referenced_keys(self, keys: list[str]) -> set[str]:
+        if not keys:
+            return set()
+        result = await self._db.prepare(REFERENCED_KEYS_SQL).bind(json.dumps(keys)).all()
+        return {r["r2_key"] for r in result.results}
 
     @staticmethod
     def _now() -> str:

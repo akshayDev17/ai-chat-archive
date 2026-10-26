@@ -1,7 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { listSessions } from '@/lib/api';
+import { listSessions, mediaSummary } from '@/lib/api';
+import type { MediaCounts } from '@/lib/media';
 import type { Session } from '@/types';
 import StoryLink from './StoryLink';
 
@@ -17,7 +18,15 @@ export default function FrontPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Your own stories' image copies, by story id. Asked of `/api/desk/`, so it is
+  // empty for everyone but a signed-in filer: the edition itself stays the same
+  // for every reader, and only your cards gain a line linking to their images.
+  const [images, setImages] = useState<Map<string, MediaCounts>>(new Map());
+
   const refresh = useCallback(async () => {
+    mediaSummary()
+      .then((filings) => setImages(new Map(filings.map((f) => [f.id, f]))))
+      .catch(() => setImages(new Map()));
     try {
       setSessions(await listSessions());
       setError(null);
@@ -72,18 +81,18 @@ export default function FrontPage() {
     <div className="frontpage">
       <div className={leads.length > 1 ? 'leads leads-2' : 'leads'}>
         {leads.map((session) => (
-          <StoryLink key={session.id} session={session} variant="lead" />
+          <StoryLink key={session.id} session={session} variant="lead" images={images.get(session.id)} />
         ))}
       </div>
 
-      {flowLead ? <StoryLink session={flowLead} variant="flow-lead" /> : null}
+      {flowLead ? <StoryLink session={flowLead} variant="flow-lead" images={images.get(flowLead.id)} /> : null}
 
       {columns.some((col) => col.length > 0) ? (
         <div className="flow">
           {columns.map((col, i) => (
             <div className="fcol" key={i}>
               {col.map((session) => (
-                <StoryLink key={session.id} session={session} variant="flow" />
+                <StoryLink key={session.id} session={session} variant="flow" images={images.get(session.id)} />
               ))}
             </div>
           ))}

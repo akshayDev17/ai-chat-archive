@@ -212,6 +212,32 @@ class RetractTests(unittest.TestCase):
 
         self.assertIn("chat-archives/s1/msg-1/01.jpg", self.store.objects)
 
+    def test_retracting_also_frees_images_copied_before_per_story_folders(self):
+        # A story copied into the old flat `img/` folder: its rows still name
+        # those keys, and retracting the last copy deletes them too.
+        asyncio.run(self.repo.upsert(story("s1", [img(1)])))
+        asyncio.run(self.store.put("img/legacy.jpg", JPEG, "image/jpeg"))
+        asyncio.run(self.store.put("img/someone-elses.jpg", JPEG, "image/jpeg"))
+        row = self.repo._media[0]
+        row.update(status="copied", r2_key="img/legacy.jpg", object_path=None)
+
+        asyncio.run(retract_story(self.repo, self.store, "s1", OWNER))
+
+        self.assertNotIn("img/legacy.jpg", self.store.objects)
+        self.assertIn("img/someone-elses.jpg", self.store.objects)
+
+    def test_an_old_image_another_story_still_shows_is_kept(self):
+        # Old `img/` keys were shared between stories that showed the same picture.
+        asyncio.run(self.repo.upsert(story("s1", [img(1)])))
+        asyncio.run(self.repo.upsert(story("s2", [img(1)])))
+        asyncio.run(self.store.put("img/shared.jpg", JPEG, "image/jpeg"))
+        for row in self.repo._media:
+            row.update(status="copied", r2_key="img/shared.jpg", object_path=None)
+
+        asyncio.run(retract_story(self.repo, self.store, "s1", OWNER))
+
+        self.assertIn("img/shared.jpg", self.store.objects)
+
     def test_retracting_what_you_never_filed_deletes_nothing(self):
         asyncio.run(self.repo.upsert(story("s1", [img(1)], owner="guest@example.com")))
 
@@ -337,6 +363,18 @@ class R2ReadTests(unittest.TestCase):
         self.assertEqual(deleted, 2)
         self.assertEqual([o["prefix"] for o in calls["list"]], ["chat-archives/s1/"] * 2)
         self.assertEqual(calls["delete"], [["chat-archives/s1/m/01.jpg"], ["chat-archives/s1/n/01.jpg"]])
+
+    def test_delete_keys_deletes_exactly_those_keys(self):
+        calls = []
+
+        class Bucket:
+            async def delete(self, keys):
+                calls.append(keys)
+
+        self.assertEqual(asyncio.run(R2MediaStore(Bucket()).delete_keys(["img/a.jpg", "img/b.jpg"])), 2)
+        self.assertEqual(calls, [["img/a.jpg", "img/b.jpg"]])
+        self.assertEqual(asyncio.run(R2MediaStore(Bucket()).delete_keys([])), 0)
+        self.assertEqual(len(calls), 1, "nothing to delete is no call at all")
 
     def test_delete_prefix_refuses_anything_but_a_story_folder(self):
         for bad in ("", "chat-archives/", "chat-archives/s1", "img/"):

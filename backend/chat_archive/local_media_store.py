@@ -26,6 +26,12 @@ class MemoryMediaStore(MediaStore):
         self.objects[key] = (data, content_type)
         self.metadata[key] = dict(metadata or {})
 
+    async def delete_keys(self, keys: list[str]) -> int:
+        for key in keys:
+            self.objects.pop(key, None)
+            self.metadata.pop(key, None)
+        return len(keys)
+
     async def delete_prefix(self, prefix: str) -> int:
         doomed = [key for key in self.objects if key.startswith(prefix)]
         for key in doomed:
@@ -52,6 +58,16 @@ class DirectoryMediaStore(MediaStore):
         path.write_bytes(data)
         path.with_name(path.name + ".type").write_text(content_type)
         path.with_name(path.name + ".meta.json").write_text(json.dumps(metadata or {}))
+
+    async def delete_keys(self, keys: list[str]) -> int:
+        root = self._root.resolve()
+        for key in keys:
+            path = (self._root / key).resolve()
+            if root not in path.parents:
+                raise ValueError(f"key outside the store: {key!r}")
+            for f in (path, path.with_name(path.name + ".type"), path.with_name(path.name + ".meta.json")):
+                f.unlink(missing_ok=True)
+        return len(keys)
 
     async def delete_prefix(self, prefix: str) -> int:
         # Prefixes are folders here (`chat-archives/<share_id>/`); refuse anything

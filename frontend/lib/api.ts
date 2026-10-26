@@ -7,6 +7,7 @@ import type {
   SessionListResponse,
   WhoAmI,
 } from '@/types';
+import type { MediaCounts } from '@/lib/media';
 
 // Point this at the Python Worker's origin (e.g. the local dev server while
 // developing, or the same origin in production once the Worker and the site
@@ -117,15 +118,23 @@ export function ingestSession(shareUrl: string): Promise<IngestResult> {
   });
 }
 
+export interface FilingStatus {
+  yours: boolean;
+  /** How the story's image copies stand; `null` when it has no images. */
+  images: MediaCounts | null;
+}
+
 /**
- * Whether the signed-in reader filed this story — i.e. whether to offer them a
- * retraction. `false` for anyone else, and for anonymous visitors: Access
- * bounces their `/api/desk/` call (or it 401s), which is the same answer.
+ * Whether the signed-in reader filed this story — so the reader can offer them
+ * a retraction and a link to its images. Not theirs for anyone else, and for
+ * anonymous visitors: Access bounces their `/api/desk/` call (or it 401s),
+ * which is the same answer.
  */
-export function isFiledByYou(id: string): Promise<boolean> {
-  return request<{ yours: boolean }>(`/api/desk/sessions/${encodeURIComponent(id)}`)
-    .then((d) => d.yours)
-    .catch(() => false);
+export function filingStatus(id: string): Promise<FilingStatus> {
+  return request<FilingStatus>(`/api/desk/sessions/${encodeURIComponent(id)}`).catch(() => ({
+    yours: false,
+    images: null,
+  }));
 }
 
 /** Take one of your own stories out of the edition. Someone else's copy stays. */

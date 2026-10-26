@@ -447,6 +447,14 @@ class MediaContract:
         asyncio.run(self.repo.upsert(illustrated("share-a", "Story, re-filed", AKSHAY, urls)))
         self.assertEqual(len(asyncio.run(self.repo.media_for("share-a", AKSHAY))["images"]), 150)
 
+    def test_referenced_keys_reports_which_keys_rows_still_use(self):
+        asyncio.run(self.repo.upsert(illustrated("share-a", "Story", AKSHAY, [img(1)])))
+        self._copy_first(key="img/abc.jpg")
+        self.assertEqual(
+            asyncio.run(self.repo.referenced_keys(["img/abc.jpg", "img/gone.jpg"])), {"img/abc.jpg"}
+        )
+        self.assertEqual(asyncio.run(self.repo.referenced_keys([])), set())
+
     def test_retracting_removes_media_rows(self):
         asyncio.run(self.repo.upsert(illustrated("share-a", "Story", AKSHAY, [img(1)])))
         asyncio.run(self.repo.delete("share-a", AKSHAY))
