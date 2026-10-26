@@ -19,7 +19,7 @@ from dataclasses import replace
 
 from .models import Conversation, normalize_email
 from .ports import ConversationRepository
-from .repository import media_by_message, media_image, media_rows_for
+from .repository import RECLAIM_ERROR, media_by_message, media_image, media_rows_for
 
 #: Column order of `media_rows_for`'s tuples (the INSERT's parameter order).
 _MEDIA_COLUMNS = (
@@ -157,10 +157,17 @@ class MemoryConversationRepository(ConversationRepository):
         now: str,
         stale_before: str,
         only: tuple[str, str] | None = None,
+        max_attempts: int = 3,
     ) -> list[dict]:
         for row in self._media:
             if row["status"] == "copying" and (row["claimed_at"] or "") < stale_before:
-                row.update(status="pending", claimed_at=None)
+                attempts = row["attempts"] + 1
+                row.update(
+                    attempts=attempts,
+                    last_error=RECLAIM_ERROR,
+                    claimed_at=None,
+                    status="failed" if attempts >= max_attempts else "pending",
+                )
 
         scope = (normalize_email(only[0]), only[1]) if only else None
         filing_order = {key: i for i, key in enumerate(self._by_key)}

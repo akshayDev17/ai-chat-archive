@@ -266,13 +266,11 @@ def _genui_resolutions(message: dict) -> tuple[list[dict], dict]:
     """A message's GenUI components and what each one resolved to."""
     metadata = message.get("metadata") or {}
     components = [c for c in metadata.get("genui_components") or [] if isinstance(c, dict)]
-    results = (
-        ((metadata.get("model_dil_v2") or {}).get("appData") or {})
-        .get("opGenui", {})
-        .get("componentResults")
-        or {}
-    )
-    return components, results
+    # Every level can be absent *or* null in a real payload, so each one is
+    # `or {}` — a null `opGenui` used to crash the filing of the whole share.
+    app_data = (metadata.get("model_dil_v2") or {}).get("appData") or {}
+    results = (app_data.get("opGenui") or {}).get("componentResults") or {}
+    return components, results if isinstance(results, dict) else {}
 
 
 def _genui_references(message: dict) -> list[dict]:

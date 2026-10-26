@@ -51,6 +51,11 @@ class _FakeD1Statement:
         self._params = params
 
     def bind(self, *params):
+        # D1 refuses more than 100 bound parameters per query; SQLite allows
+        # ~32k, so without this the fake would hide the limit.
+        # https://developers.cloudflare.com/d1/platform/limits/
+        if len(params) > 100:
+            raise RuntimeError(f"D1: too many SQL variables ({len(params)} > 100)")
         return _FakeD1Statement(self._conn, self._sql, params)
 
     async def first(self):
@@ -402,6 +407,12 @@ class MediaContract:
 
         self.assertEqual(self._statuses("share-b", GUEST), ["copied", "pending"])
 
+    def test_a_story_with_more_than_a_hundred_images_files(self):
+        urls = [img(n) for n in range(150)]
+        asyncio.run(self.repo.upsert(illustrated("share-a", "Story", AKSHAY, urls)))
+        asyncio.run(self.repo.upsert(illustrated("share-a", "Story, re-filed", AKSHAY, urls)))
+        self.assertEqual(len(asyncio.run(self.repo.media_for("share-a", AKSHAY))["images"]), 150)
+
     def test_retracting_removes_media_rows(self):
         asyncio.run(self.repo.upsert(illustrated("share-a", "Story", AKSHAY, [img(1)])))
         asyncio.run(self.repo.delete("share-a", AKSHAY))
@@ -506,6 +517,22 @@ class MediaContract:
         reclaimed = self._claim(now=T0_PLUS_6, stale_before=T0_PLUS_1)
 
         self.assertEqual([c["content_url"] for c in reclaimed], [img(1)])
+
+    def test_a_run_that_keeps_dying_on_an_image_eventually_fails_it(self):
+        # A fetch that hangs kills the run every time. Each reclaim counts as an
+        # attempt, so the image reaches `failed` (and the owner's Retry) instead
+        # of looping forever.
+        asyncio.run(self.repo.upsert(illustrated("share-a", "Mine", AKSHAY, [img(1)])))
+        times = ["2026-10-26T12:00:00+00:00", "2026-10-26T12:10:00+00:00",
+                 "2026-10-26T12:20:00+00:00", "2026-10-26T12:30:00+00:00"]
+        self._claim(now=times[0])
+        for now, stale_before in zip(times[1:], times):
+            self._claim(now=now, stale_before=stale_before.replace(":00+", ":01+"))
+
+        (image,) = asyncio.run(self.repo.media_for("share-a", AKSHAY))["images"]
+        self.assertEqual(image["status"], "failed")
+        self.assertEqual(image["attempts"], 3)
+        self.assertIn("did not finish", image["last_error"])
 
     def test_a_fresh_copying_row_is_not_reclaimed(self):
         asyncio.run(self.repo.upsert(illustrated("share-a", "Mine", AKSHAY, [img(1)])))

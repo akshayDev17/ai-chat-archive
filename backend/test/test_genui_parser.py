@@ -281,5 +281,22 @@ class MergedFragmentsAreNotRepeated(unittest.TestCase):
         self.assertEqual([m.content for m in messages][-1], "Only copy.")
 
 
+class OddPayloadShapes(unittest.TestCase):
+    def test_a_null_opgenui_does_not_crash_the_filing(self):
+        payload = genui_payload("Plain reply.", [], {})
+        payload["mapping"]["n2"]["message"]["metadata"]["model_dil_v2"] = {"appData": {"opGenui": None}}
+        messages = ChatGptParser().parse("share-id", payload).messages
+        self.assertEqual(messages[-1].content, "Plain reply.")
+
+    def test_non_dict_component_results_are_ignored(self):
+        text = f"Fact. {CITE_TAG}"
+        component, _ = cite_at(text, CITE_TAG, "r1", [item("https://a.com/x")])
+        payload = genui_payload(text, [component], {})
+        payload["mapping"]["n2"]["message"]["metadata"]["model_dil_v2"] = {
+            "appData": {"opGenui": {"componentResults": ["not", "a", "dict"]}}
+        }
+        self.assertEqual(ChatGptParser().parse("share-id", payload).messages[-1].sources, [])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

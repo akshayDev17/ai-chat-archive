@@ -57,10 +57,18 @@ Deno.serve(async (req) => {
   }
 
   if (isImage) {
-    const image = await fetch(parsed, {
-      headers: { "User-Agent": USER_AGENT, "Accept": "image/avif,image/webp,image/*" },
-      redirect: "follow",
-    });
+    // Bounded, so a hung upstream fails this one image instead of outliving
+    // the Worker's cron run (which would leave the whole batch stuck copying).
+    let image: Response;
+    try {
+      image = await fetch(parsed, {
+        headers: { "User-Agent": USER_AGENT, "Accept": "image/avif,image/webp,image/*" },
+        redirect: "follow",
+        signal: AbortSignal.timeout(20_000),
+      });
+    } catch {
+      return new Response("upstream timed out", { status: 504 });
+    }
     if (image.status !== 200) {
       return new Response(`upstream ${image.status}`, { status: 502 });
     }
