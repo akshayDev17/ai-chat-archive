@@ -58,9 +58,14 @@ def safe_next(raw: str | None) -> str:
     return raw
 
 
-#: R2 keys the copier writes: ``img/<sha256 hex>.<ext>``. Anything else is not
-#: ours to serve — and locally a key is a filesystem path, so it must not climb.
-_MEDIA_KEY_RE = re.compile(r"^img/[0-9a-f]{64}\.(?:jpg|png|webp|gif|avif)$")
+#: R2 keys the copier writes: ``chat-archives/<share_id>/<message id>/<NN>.<ext>``,
+#: and the flat ``img/<sha256 hex>.<ext>`` of images copied before per-story
+#: paths. Anything else is not ours to serve — and locally a key is a
+#: filesystem path, so no segment may contain a dot or a slash of its own.
+_MEDIA_KEY_RE = re.compile(
+    r"^(?:img/[0-9a-f]{64}|chat-archives/[A-Za-z0-9-]+/[A-Za-z0-9-]+/\d{2,})"
+    r"\.(?:jpg|png|webp|gif|avif)\Z"
+)
 
 _DESK_MEDIA_RE = re.compile(r"/api/desk/media(?:/([^/]+)(?:/(retry|copy))?)?$")
 

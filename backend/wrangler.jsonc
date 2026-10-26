@@ -31,7 +31,8 @@
   ],
 
   // Images from ChatGPT's GenUI replies, copied out of images.openai.com so a
-  // story keeps its pictures. Keys are img/<sha256(url)>.<ext>; the Worker serves
+  // story keeps its pictures. Keys are chat-archives/<share_id>/<message id>/<NN>.<ext>
+  // (one folder per story, retract deletes it); the Worker serves
   // them publicly at /api/media/<key>. Create once with:
   //   npx wrangler r2 bucket create ai-chat-archive-media
   "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "ai-chat-archive-media" }],

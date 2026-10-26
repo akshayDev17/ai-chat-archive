@@ -25,6 +25,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from dataclasses import replace
 from types import SimpleNamespace
 
 BACKEND = Path(__file__).resolve().parents[1]
@@ -341,8 +342,9 @@ T0_MINUS_4 = "2026-10-26T11:56:00+00:00"
 
 
 def illustrated(share_id: str, title: str, owner: str, urls: list[str]) -> Conversation:
-    """A filed story whose second message shows one image per url, in order."""
+    """A filed story whose second message (ChatGPT id `msg-1`) shows one image per url."""
     conv = conversation(share_id, title, owner)
+    conv.messages[1] = replace(conv.messages[1], external_id="msg-1")
     conv.messages[1].media.extend(
         Media(tag_start=10 * i, ordinal=0, content_url=url) for i, url in enumerate(urls)
     )
@@ -386,26 +388,58 @@ class MediaContract:
         media = asyncio.run(self.repo.get("share-a")).messages[1].media
         self.assertEqual([(m.tag_start, m.ordinal) for m in media], [(10, 0), (10, 1), (50, 0)])
 
+    def test_each_image_gets_a_path_under_its_story_and_message(self):
+        asyncio.run(self.repo.upsert(illustrated("share-a", "Story", AKSHAY, [img(1), img(2)])))
+
+        images = asyncio.run(self.repo.media_for("share-a", AKSHAY))["images"]
+        self.assertEqual(
+            [i["object_path"] for i in images],
+            ["chat-archives/share-a/msg-1/01", "chat-archives/share-a/msg-1/02"],
+        )
+        (claimed, _) = self._claim(limit=2)
+        self.assertEqual(claimed["object_path"], "chat-archives/share-a/msg-1/01")
+
+    def _copy_first(self, key="chat-archives/share-a/msg-1/01.jpg"):
+        (row, *_) = self._claim()
+        asyncio.run(self.repo.finish_media(row["id"], key, "image/jpeg"))
+
     def test_refiling_keeps_copied_images_copied(self):
         asyncio.run(self.repo.upsert(illustrated("share-a", "Story", AKSHAY, [img(1)])))
-        self._claim()
-        asyncio.run(self.repo.finish_media(img(1), "img/abc.jpg", "image/jpeg"))
+        self._copy_first()
 
         asyncio.run(self.repo.upsert(illustrated("share-a", "Story, re-filed", AKSHAY, [img(1)])))
 
         media = asyncio.run(self.repo.get("share-a", AKSHAY)).messages[1].media
         self.assertEqual(media[0].status, "copied")
-        self.assertEqual(media[0].r2_key, "img/abc.jpg")
+        self.assertEqual(media[0].r2_key, "chat-archives/share-a/msg-1/01.jpg")
         self.assertEqual(media[0].content_type, "image/jpeg")
 
-    def test_a_newly_filed_story_reuses_an_image_copied_for_another(self):
+    def test_refiling_with_a_different_image_in_that_place_copies_it_again(self):
+        asyncio.run(self.repo.upsert(illustrated("share-a", "Story", AKSHAY, [img(1)])))
+        self._copy_first()
+
+        asyncio.run(self.repo.upsert(illustrated("share-a", "Story", AKSHAY, [img(9)])))
+
+        self.assertEqual(self._statuses("share-a", AKSHAY), ["pending"])
+
+    def test_a_second_filer_of_the_same_link_reuses_its_copied_images(self):
+        # Same link, same folder: the path depends on the share, not the filer.
+        asyncio.run(self.repo.upsert(illustrated("share-a", "Mine", AKSHAY, [img(1)])))
+        self._copy_first()
+
+        asyncio.run(self.repo.upsert(illustrated("share-a", "Theirs", GUEST, [img(1)])))
+
+        self.assertEqual(self._statuses("share-a", GUEST), ["copied"])
+
+    def test_another_story_showing_the_same_image_gets_its_own_copy(self):
+        # Stories never share objects, so one story's folder can always be
+        # deleted without touching another's.
         asyncio.run(self.repo.upsert(illustrated("share-a", "First", AKSHAY, [img(1)])))
-        self._claim()
-        asyncio.run(self.repo.finish_media(img(1), "img/abc.jpg", "image/jpeg"))
+        self._copy_first()
 
-        asyncio.run(self.repo.upsert(illustrated("share-b", "Second", GUEST, [img(1), img(2)])))
+        asyncio.run(self.repo.upsert(illustrated("share-b", "Second", AKSHAY, [img(1)])))
 
-        self.assertEqual(self._statuses("share-b", GUEST), ["copied", "pending"])
+        self.assertEqual(self._statuses("share-b", AKSHAY), ["pending"])
 
     def test_a_story_with_more_than_a_hundred_images_files(self):
         urls = [img(n) for n in range(150)]
@@ -427,7 +461,7 @@ class MediaContract:
         asyncio.run(self.repo.upsert(conversation("share-plain", "No images", AKSHAY)))
         asyncio.run(self.repo.upsert(illustrated("share-b", "Theirs", GUEST, [img(4)])))
         claimed = self._claim(limit=2, only=(AKSHAY, "share-a"))
-        asyncio.run(self.repo.finish_media(claimed[0]["content_url"], "img/k.jpg", "image/jpeg"))
+        asyncio.run(self.repo.finish_media(claimed[0]["id"], "k.jpg", "image/jpeg"))
         asyncio.run(self.repo.fail_media(claimed[1]["id"], "boom", max_attempts=1))
 
         summary = asyncio.run(self.repo.media_summary(AKSHAY))
@@ -449,7 +483,7 @@ class MediaContract:
         self.assertEqual(image["status"], "pending")
         self.assertEqual(image["attempts"], 0)
         self.assertEqual(image["message_seq"], 1)
-        for key in ("id", "tag_start", "ordinal", "origin_url", "last_error", "r2_key"):
+        for key in ("id", "tag_start", "ordinal", "origin_url", "last_error", "r2_key", "object_path"):
             self.assertIn(key, image)
 
     def test_media_for_is_none_for_someone_elses_story(self):
@@ -480,7 +514,7 @@ class MediaContract:
         claimed = self._claim(limit=2)
 
         self.assertEqual(len(claimed), 2)
-        self.assertEqual(set(claimed[0]), {"id", "content_url"})
+        self.assertEqual(set(claimed[0]), {"id", "content_url", "origin_url", "object_path"})
         self.assertEqual(sorted(self._statuses("share-a", AKSHAY)), ["copying", "copying", "pending"])
         self.assertEqual(len(self._claim(limit=5)), 1)
 
@@ -504,7 +538,7 @@ class MediaContract:
     def test_claim_skips_copied_and_failed_rows(self):
         asyncio.run(self.repo.upsert(illustrated("share-a", "Mine", AKSHAY, [img(1), img(2)])))
         first, second = self._claim()
-        asyncio.run(self.repo.finish_media(first["content_url"], "img/k.jpg", "image/jpeg"))
+        asyncio.run(self.repo.finish_media(first["id"], "k.jpg", "image/jpeg"))
         asyncio.run(self.repo.fail_media(second["id"], "boom", max_attempts=1))
 
         self.assertEqual(self._claim(now=T0_PLUS_6, stale_before=T0_PLUS_1), [])
@@ -540,15 +574,13 @@ class MediaContract:
 
         self.assertEqual(self._claim(now=T0_PLUS_1, stale_before=T0_MINUS_4), [])
 
-    def test_finish_marks_every_row_with_that_url(self):
-        asyncio.run(self.repo.upsert(illustrated("share-a", "Mine", AKSHAY, [img(1)])))
-        asyncio.run(self.repo.upsert(illustrated("share-b", "Theirs", GUEST, [img(1)])))
-        self._claim(limit=1)
+    def test_finish_marks_only_that_row(self):
+        asyncio.run(self.repo.upsert(illustrated("share-a", "Mine", AKSHAY, [img(1), img(1)])))
+        (first, _) = self._claim(limit=2)
 
-        asyncio.run(self.repo.finish_media(img(1), "img/k.jpg", "image/png"))
+        asyncio.run(self.repo.finish_media(first["id"], "k.png", "image/png"))
 
-        self.assertEqual(self._statuses("share-a", AKSHAY), ["copied"])
-        self.assertEqual(self._statuses("share-b", GUEST), ["copied"])
+        self.assertEqual(sorted(self._statuses("share-a", AKSHAY)), ["copied", "copying"])
 
     def test_fail_retries_then_gives_up_at_three(self):
         asyncio.run(self.repo.upsert(illustrated("share-a", "Mine", AKSHAY, [img(1)])))
@@ -642,6 +674,56 @@ class TestSqliteMigration(unittest.TestCase):
 
         # And only the legacy owner sees it.
         self.assertEqual(asyncio.run(repo.list_recent("someone@else.com")), [])
+
+
+class TestMediaPathMigration(unittest.TestCase):
+    """0003 on a database that already holds images copied into the flat `img/`.
+
+    Copied rows keep serving from where they are; rows not yet copied can never
+    get a path (their message ids were not stored), so they are marked failed
+    with the fix — file the story again.
+    """
+
+    def _legacy_db(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        for name in ("0001_init.sql", "0002_media.sql"):
+            conn.executescript((BACKEND / "migrations" / name).read_text())
+        conn.executescript(
+            """
+            INSERT INTO conversations (id, owner_email, external_id, title, created_at, updated_at)
+            VALUES ('c1', 'a@x.com', 'share-a', 'Old', '2026-10-26', '2026-10-26');
+            INSERT INTO media (id, conversation_id, message_seq, tag_start, ordinal, content_url,
+                               status, r2_key, content_type)
+            VALUES ('m1', 'c1', 1, 0, 0, 'https://i/1', 'copied', 'img/abc.jpg', 'image/jpeg'),
+                   ('m2', 'c1', 1, 9, 0, 'https://i/2', 'pending', NULL, NULL);
+            """
+        )
+        return conn
+
+    def test_copied_rows_keep_serving_and_uncopied_rows_ask_for_a_refile(self):
+        conn = self._legacy_db()
+        conn.executescript((BACKEND / "migrations" / "0003_media_paths.sql").read_text())
+
+        rows = {r["id"]: r for r in conn.execute("SELECT * FROM media")}
+        self.assertEqual((rows["m1"]["status"], rows["m1"]["r2_key"]), ("copied", "img/abc.jpg"))
+        self.assertEqual(rows["m2"]["status"], "failed")
+        self.assertIn("file this story again", rows["m2"]["last_error"])
+
+    def test_the_local_sqlite_database_upgrades_itself(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        path = str(Path(tmp.name) / "archive.db")
+        old = sqlite3.connect(path)
+        for name in ("0001_init.sql", "0002_media.sql"):
+            old.executescript((BACKEND / "migrations" / name).read_text())
+        old.commit()
+        old.close()
+
+        repo = SqliteConversationRepository(path)
+        asyncio.run(repo.upsert(illustrated("share-a", "Story", AKSHAY, [img(1)])))
+        (image,) = asyncio.run(repo.media_for("share-a", AKSHAY))["images"]
+        self.assertEqual(image["object_path"], "chat-archives/share-a/msg-1/01")
 
 
 if __name__ == "__main__":

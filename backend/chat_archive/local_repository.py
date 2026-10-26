@@ -19,12 +19,12 @@ from dataclasses import replace
 
 from .models import Conversation, normalize_email
 from .ports import ConversationRepository
-from .repository import RECLAIM_ERROR, media_by_message, media_image, media_rows_for
+from .repository import RECLAIM_ERROR, claimed_row, media_by_message, media_image, media_paths, media_rows_for
 
 #: Column order of `media_rows_for`'s tuples (the INSERT's parameter order).
 _MEDIA_COLUMNS = (
     "key", "message_seq", "tag_start", "ordinal", "content_url", "origin_url",
-    "status", "r2_key", "content_type", "id",
+    "status", "r2_key", "content_type", "id", "object_path",
 )
 
 
@@ -40,13 +40,14 @@ class MemoryConversationRepository(ConversationRepository):
             raise ValueError("Refusing to store a conversation with no owner_email.")
         key = (owner, conversation.share_id)
 
+        paths = {p for ps in media_paths(conversation.share_id, conversation.messages) for p in ps}
         copied = {
-            row["content_url"]: (row["r2_key"], row["content_type"])
+            row["object_path"]: (row["content_url"], row["r2_key"], row["content_type"])
             for row in self._media
-            if row["status"] == "copied"
+            if row["status"] == "copied" and row["object_path"] in paths
         }
         self._media = [row for row in self._media if row["key"] != key]
-        for values in media_rows_for(key, conversation.messages, copied):
+        for values in media_rows_for(key, conversation.share_id, conversation.messages, copied):
             self._media.append(
                 {**dict(zip(_MEDIA_COLUMNS, values)), "attempts": 0, "last_error": None, "claimed_at": None}
             )
@@ -180,11 +181,11 @@ class MemoryConversationRepository(ConversationRepository):
         )[:limit]
         for row in candidates:
             row.update(status="copying", claimed_at=now)
-        return [{"id": r["id"], "content_url": r["content_url"]} for r in candidates]
+        return [claimed_row(r) for r in candidates]
 
-    async def finish_media(self, content_url: str, r2_key: str, content_type: str) -> None:
+    async def finish_media(self, media_id: str, r2_key: str, content_type: str) -> None:
         for row in self._media:
-            if row["content_url"] == content_url and row["status"] != "copied":
+            if row["id"] == media_id:
                 row.update(
                     status="copied", r2_key=r2_key, content_type=content_type,
                     last_error=None, claimed_at=None,

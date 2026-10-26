@@ -25,7 +25,7 @@ from chat_archive.chatgpt.fetcher import FetchError  # noqa: E402
 from chat_archive.chatgpt.proxy_fetcher import ProxyImageFetcher  # noqa: E402
 from chat_archive.local_media_store import DirectoryMediaStore, MemoryMediaStore  # noqa: E402
 from chat_archive.local_repository import MemoryConversationRepository  # noqa: E402
-from chat_archive.media_copier import MAX_BYTES, copy_pending, media_key  # noqa: E402
+from chat_archive.media_copier import MAX_BYTES, copy_pending, media_key, retract_story  # noqa: E402
 from chat_archive.models import Conversation, Media, Message  # noqa: E402
 from chat_archive.r2_media_store import R2MediaStore  # noqa: E402
 
@@ -48,6 +48,7 @@ def story(share_id: str, urls: list[str], owner: str = OWNER) -> Conversation:
                 role="assistant",
                 content="a",
                 media=[Media(tag_start=i, ordinal=0, content_url=u) for i, u in enumerate(urls)],
+                external_id="msg-1",
             ),
         ],
     ).owned_by(owner)
@@ -87,8 +88,19 @@ class CopierTests(unittest.TestCase):
 
         self.assertEqual(result, {"copied": 2, "failed": 0})
         self.assertEqual(self.statuses("s1"), ["copied", "copied"])
-        key = media_key(img(1), "image/jpeg")
-        self.assertEqual(asyncio.run(self.store.get(key)), (JPEG, "image/jpeg"))
+        self.assertEqual(
+            sorted(self.store.objects),
+            ["chat-archives/s1/msg-1/01.jpg", "chat-archives/s1/msg-1/02.jpg"],
+        )
+        self.assertEqual(asyncio.run(self.store.get("chat-archives/s1/msg-1/01.jpg")), (JPEG, "image/jpeg"))
+
+    def test_each_object_says_where_it_came_from(self):
+        asyncio.run(self.repo.upsert(story("s1", [img(1)])))
+        self.run_copier(FakeFetcher())
+        self.assertEqual(
+            self.store.metadata["chat-archives/s1/msg-1/01.jpg"],
+            {"share_id": "s1", "message_id": "msg-1", "source_url": img(1), "origin_url": ""},
+        )
 
     def test_the_same_url_in_one_batch_is_fetched_once(self):
         asyncio.run(self.repo.upsert(story("s1", [img(1), img(1)])))
@@ -98,6 +110,7 @@ class CopierTests(unittest.TestCase):
 
         self.assertEqual(fetcher.calls, [img(1)])
         self.assertEqual(self.statuses("s1"), ["copied", "copied"])
+        self.assertEqual(len(self.store.objects), 2, "one fetch, but each image keeps its own place")
 
     def test_a_fetch_error_retries_then_fails_after_three_runs(self):
         asyncio.run(self.repo.upsert(story("s1", [img(1)])))
@@ -135,7 +148,7 @@ class CopierTests(unittest.TestCase):
         self.run_copier(FakeFetcher(content_type="image/png; charset=binary"))
 
         self.assertEqual(self.statuses("s1"), ["copied"])
-        self.assertIn(media_key(img(1), "image/png"), self.store.objects)
+        self.assertIn("chat-archives/s1/msg-1/01.png", self.store.objects)
 
     def test_an_oversized_image_fails_the_row(self):
         asyncio.run(self.repo.upsert(story("s1", [img(1)])))
@@ -160,11 +173,50 @@ class CopierTests(unittest.TestCase):
         self.assertEqual(self.run_copier(FakeFetcher()), {"copied": 10, "failed": 0})
         self.assertEqual(self.run_copier(FakeFetcher()), {"copied": 2, "failed": 0})
 
-    def test_media_key_is_stable_and_typed(self):
-        digest = hashlib.sha256(b"https://x/a").hexdigest()
-        self.assertEqual(media_key("https://x/a", "image/jpeg"), f"img/{digest}.jpg")
-        self.assertEqual(media_key("https://x/a", "image/webp"), f"img/{digest}.webp")
-        self.assertIsNone(media_key("https://x/a", "text/html"))
+    def test_media_key_is_the_path_plus_the_type(self):
+        self.assertEqual(media_key("chat-archives/s/m/01", "image/jpeg"), "chat-archives/s/m/01.jpg")
+        self.assertEqual(media_key("chat-archives/s/m/01", "image/webp"), "chat-archives/s/m/01.webp")
+        self.assertIsNone(media_key("chat-archives/s/m/01", "text/html"))
+
+    def test_a_row_with_no_path_fails_with_the_fix(self):
+        # A row filed before paths existed, put back in the queue by Retry.
+        asyncio.run(self.repo.upsert(story("s1", [img(1)])))
+        self.repo._media[0]["object_path"] = None
+
+        self.assertEqual(self.run_copier(FakeFetcher()), {"copied": 0, "failed": 1})
+        (image,) = asyncio.run(self.repo.media_for("s1", OWNER))["images"]
+        self.assertIn("file this story again", image["last_error"])
+
+
+class RetractTests(unittest.TestCase):
+    """Retracting a story removes its R2 folder — unless someone else still files it."""
+
+    def setUp(self):
+        self.repo = MemoryConversationRepository()
+        self.store = MemoryMediaStore()
+        asyncio.run(self.store.put("chat-archives/s1/msg-1/01.jpg", JPEG, "image/jpeg"))
+        asyncio.run(self.store.put("chat-archives/s10/msg-1/01.jpg", JPEG, "image/jpeg"))
+
+    def test_retracting_the_only_copy_deletes_the_story_folder(self):
+        asyncio.run(self.repo.upsert(story("s1", [img(1)])))
+
+        self.assertTrue(asyncio.run(retract_story(self.repo, self.store, "s1", OWNER)))
+
+        self.assertEqual(list(self.store.objects), ["chat-archives/s10/msg-1/01.jpg"])
+
+    def test_the_folder_stays_while_another_filer_still_has_the_story(self):
+        asyncio.run(self.repo.upsert(story("s1", [img(1)])))
+        asyncio.run(self.repo.upsert(story("s1", [img(1)], owner="guest@example.com")))
+
+        asyncio.run(retract_story(self.repo, self.store, "s1", OWNER))
+
+        self.assertIn("chat-archives/s1/msg-1/01.jpg", self.store.objects)
+
+    def test_retracting_what_you_never_filed_deletes_nothing(self):
+        asyncio.run(self.repo.upsert(story("s1", [img(1)], owner="guest@example.com")))
+
+        self.assertFalse(asyncio.run(retract_story(self.repo, self.store, "s1", OWNER)))
+        self.assertIn("chat-archives/s1/msg-1/01.jpg", self.store.objects)
 
 
 class ProxyImageFetcherTests(unittest.TestCase):
@@ -212,6 +264,16 @@ class DirectoryStoreTests(unittest.TestCase):
             self.assertEqual(asyncio.run(store.get("img/abc.png")), (b"png!", "image/png"))
             self.assertIsNone(asyncio.run(store.get("img/missing.png")))
 
+    def test_delete_prefix_removes_one_story_folder_only(self):
+        with tempfile.TemporaryDirectory() as root:
+            store = DirectoryMediaStore(root)
+            for key in ("chat-archives/s1/m/01.jpg", "chat-archives/s1/n/01.jpg", "chat-archives/s10/m/01.jpg"):
+                asyncio.run(store.put(key, b"x", "image/jpeg", {"share_id": "s"}))
+
+            self.assertEqual(asyncio.run(store.delete_prefix("chat-archives/s1/")), 2)
+            self.assertIsNone(asyncio.run(store.get("chat-archives/s1/m/01.jpg")))
+            self.assertIsNotNone(asyncio.run(store.get("chat-archives/s10/m/01.jpg")))
+
 
 class R2ReadTests(unittest.TestCase):
     """Reading an object back from R2, as the Workers Python SDK delivers it.
@@ -250,6 +312,36 @@ class R2ReadTests(unittest.TestCase):
     def test_a_missing_object_is_none(self):
         store = R2MediaStore(self.bucket(memoryview(JPEG), None))
         self.assertIsNone(asyncio.run(store.get("img/missing.jpg")))
+
+    def test_delete_prefix_pages_through_the_listing_and_deletes_each_page(self):
+        pages = {
+            None: SimpleNamespace(
+                objects=[SimpleNamespace(key="chat-archives/s1/m/01.jpg")], truncated=True, cursor="c2"
+            ),
+            "c2": SimpleNamespace(
+                objects=[SimpleNamespace(key="chat-archives/s1/n/01.jpg")], truncated=False, cursor=None
+            ),
+        }
+        calls = {"list": [], "delete": []}
+
+        class Bucket:
+            async def list(self, options):
+                calls["list"].append(options)
+                return pages[options.get("cursor")]
+
+            async def delete(self, keys):
+                calls["delete"].append(keys)
+
+        deleted = asyncio.run(R2MediaStore(Bucket()).delete_prefix("chat-archives/s1/"))
+
+        self.assertEqual(deleted, 2)
+        self.assertEqual([o["prefix"] for o in calls["list"]], ["chat-archives/s1/"] * 2)
+        self.assertEqual(calls["delete"], [["chat-archives/s1/m/01.jpg"], ["chat-archives/s1/n/01.jpg"]])
+
+    def test_delete_prefix_refuses_anything_but_a_story_folder(self):
+        for bad in ("", "chat-archives/", "chat-archives/s1", "img/"):
+            with self.subTest(prefix=bad), self.assertRaises(ValueError):
+                asyncio.run(R2MediaStore(None).delete_prefix(bad))
 
 
 if __name__ == "__main__":

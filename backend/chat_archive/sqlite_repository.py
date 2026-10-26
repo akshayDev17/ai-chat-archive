@@ -27,6 +27,7 @@ import os
 import sqlite3
 import threading
 import uuid
+from pathlib import Path
 from datetime import datetime, timezone
 
 from .models import Citation, Conversation, Message, Source, normalize_email
@@ -45,8 +46,10 @@ from .repository import (
     MEDIA_SUMMARY_SQL,
     _sources_by_message,
     COPIED_MEDIA_SQL,
+    claimed_row,
     media_by_message,
     media_image,
+    media_paths,
     media_rows_for,
 )
 
@@ -122,8 +125,10 @@ CREATE TABLE IF NOT EXISTS media (
   last_error      TEXT,
   claimed_at      TEXT,
   r2_key          TEXT,
-  content_type    TEXT
+  content_type    TEXT,
+  object_path     TEXT
 );
+CREATE INDEX IF NOT EXISTS idx_media_object_path ON media(object_path);
 CREATE INDEX IF NOT EXISTS idx_media_message ON media(conversation_id, message_seq, tag_start, ordinal);
 CREATE INDEX IF NOT EXISTS idx_media_status ON media(status, claimed_at);
 CREATE INDEX IF NOT EXISTS idx_media_content_url ON media(content_url);
@@ -145,6 +150,17 @@ class SqliteConversationRepository(ConversationRepository):
         return {row[1] for row in rows}
 
     def _migrate(self) -> None:
+        """Bring an older local database up to the current schema, keeping rows."""
+        self._migrate_owner()
+        media = self._conn.execute("PRAGMA table_info(media)").fetchall()
+        if media and "object_path" not in {row[1] for row in media}:
+            # Mirrors migrations/0003_media_paths.sql.
+            self._conn.executescript(
+                (Path(__file__).resolve().parents[1] / "migrations" / "0003_media_paths.sql").read_text()
+            )
+            self._conn.commit()
+
+    def _migrate_owner(self) -> None:
         """Rebuild a pre-ownership ``conversations`` table in place, keeping rows."""
         existing = self._conn.execute(
             "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'conversations'"
@@ -197,11 +213,13 @@ class SqliteConversationRepository(ConversationRepository):
             ).fetchone()
 
             # Read before the delete below, as in the D1 repository.
-            urls = sorted({m.content_url for msg in conversation.messages for m in msg.media})
+            paths = [p for ps in media_paths(conversation.share_id, conversation.messages) for p in ps]
             copied = {}
-            if urls:
-                found = _dicts(self._conn.execute(COPIED_MEDIA_SQL, (json.dumps(urls),)))
-                copied = {r["content_url"]: (r["r2_key"], r["content_type"]) for r in found}
+            if paths:
+                found = _dicts(self._conn.execute(COPIED_MEDIA_SQL, (json.dumps(paths),)))
+                copied = {
+                    r["object_path"]: (r["content_url"], r["r2_key"], r["content_type"]) for r in found
+                }
 
             conv_id = row[0] if row else str(uuid.uuid4())
             if row:
@@ -261,7 +279,8 @@ class SqliteConversationRepository(ConversationRepository):
             )
 
             self._conn.executemany(
-                MEDIA_INSERT_SQL, media_rows_for(conv_id, conversation.messages, copied)
+                MEDIA_INSERT_SQL,
+                media_rows_for(conv_id, conversation.share_id, conversation.messages, copied),
             )
 
             if conversation.report:
@@ -472,11 +491,11 @@ class SqliteConversationRepository(ConversationRepository):
                 cursor = self._conn.execute(MEDIA_CLAIM_SQL, (now, limit))
             claimed = _dicts(cursor)
             self._conn.commit()
-        return [{"id": r["id"], "content_url": r["content_url"]} for r in claimed]
+        return [claimed_row(r) for r in claimed]
 
-    async def finish_media(self, content_url: str, r2_key: str, content_type: str) -> None:
+    async def finish_media(self, media_id: str, r2_key: str, content_type: str) -> None:
         with self._lock:
-            self._conn.execute(MEDIA_FINISH_SQL, (r2_key, content_type, content_url))
+            self._conn.execute(MEDIA_FINISH_SQL, (r2_key, content_type, media_id))
             self._conn.commit()
 
     async def fail_media(self, media_id: str, error: str, max_attempts: int = 3) -> None:
