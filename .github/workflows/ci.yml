@@ -1,12 +1,7 @@
 name: CI
 
 # Tests run on every push and every pull request. The deploy runs only on
-# main, and only after the tests have passed.
-#
-# The frontend is tested here but not deployed: its Cloudflare topology is
-# still undecided (one Worker or two), so there is no deploy job to write yet.
-# Testing it does not depend on that decision and costs a couple of minutes.
-# See docs/deploy.md §1.
+# main, and only after the tests have passed. See docs/deploy.md §5.
 
 on:
   push:
