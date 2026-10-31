@@ -129,6 +129,11 @@ jobs:
       # Bypass policy, because Bypass is evaluated before Allow and lets
       # everyone through.
       #   https://developers.cloudflare.com/cloudflare-one/access-controls/policies/
+      # Nor may a destination of that app that covers the path carry any
+      # `overrides`: "Each rule can make a matching path public, bypassing
+      # Access authentication." The docs do not say whether `path_pattern` is
+      # relative to the destination `uri`, so any override refuses.
+      #   https://developers.cloudflare.com/api/resources/zero_trust/subresources/access/subresources/applications/methods/create/
       # One step on purpose: a later change can swap
       # it for `npx -y @akshaydev17/portfolio-app@<version> verify --path
       # /api/desk/whoami` in one line.
@@ -185,6 +190,9 @@ jobs:
                   return (1, len(host))
               return None
 
+          def overridden(app):
+              return any(d.get("overrides") and specificity(d.get("uri", "")) for d in app.get("destinations") or [])
+
           def decisions(app):
               found = set()
               for p in app.get("policies") or []:
@@ -221,6 +229,8 @@ jobs:
           for rank, app in ranked:
               if rank != top:
                   continue
+              if overridden(app):
+                  fail(f"{target} is served by the Access application '{app.get('name')}', whose destination covering it has overrides that can make paths public. Refusing to deploy.")
               found = decisions(app)
               if "bypass" in found:
                   fail(f"{target} is served by the Access application '{app.get('name')}', which has a Bypass policy, so anyone can reach it. Refusing to deploy.")
@@ -375,6 +385,11 @@ jobs:
       # Bypass policy, because Bypass is evaluated before Allow and lets
       # everyone through.
       #   https://developers.cloudflare.com/cloudflare-one/access-controls/policies/
+      # Nor may a destination of that app that covers the path carry any
+      # `overrides`: "Each rule can make a matching path public, bypassing
+      # Access authentication." The docs do not say whether `path_pattern` is
+      # relative to the destination `uri`, so any override refuses.
+      #   https://developers.cloudflare.com/api/resources/zero_trust/subresources/access/subresources/applications/methods/create/
       # One step on purpose: a later change can swap
       # it for `npx -y @akshaydev17/portfolio-app@<version> verify --path
       # /api/desk/whoami` in one line.
@@ -431,6 +446,9 @@ jobs:
                   return (1, len(host))
               return None
 
+          def overridden(app):
+              return any(d.get("overrides") and specificity(d.get("uri", "")) for d in app.get("destinations") or [])
+
           def decisions(app):
               found = set()
               for p in app.get("policies") or []:
@@ -467,6 +485,8 @@ jobs:
           for rank, app in ranked:
               if rank != top:
                   continue
+              if overridden(app):
+                  fail(f"{target} is served by the Access application '{app.get('name')}', whose destination covering it has overrides that can make paths public. Refusing to deploy.")
               found = decisions(app)
               if "bypass" in found:
                   fail(f"{target} is served by the Access application '{app.get('name')}', which has a Bypass policy, so anyone can reach it. Refusing to deploy.")

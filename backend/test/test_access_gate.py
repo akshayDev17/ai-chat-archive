@@ -84,6 +84,7 @@ def app(name: str, uri: str, *decisions: str) -> dict:
 class TestAccessGate(unittest.TestCase):
     def setUp(self):
         self.scripts = access_check_scripts()
+        self.assertEqual(len(self.scripts), 2)
 
     def verdicts(self, urlopen) -> list[tuple[int, str]]:
         return [run_check(s, urlopen) for s in self.scripts]
@@ -98,9 +99,6 @@ class TestAccessGate(unittest.TestCase):
             self.assertEqual(code, 1, out)
             self.assertIn("::error::", out)
         return [out for _, out in results]
-
-    def test_both_deploy_jobs_run_the_check(self):
-        self.assertEqual(len(self.scripts), 2)
 
     def test_passes_when_the_desk_app_only_allows(self):
         self.assert_passes(fake_cloudflare([app("desk", f"{HOST}/api/desk/*", "allow")]))
@@ -131,6 +129,12 @@ class TestAccessGate(unittest.TestCase):
             app("site", HOST, "allow"),
             app("desk", f"{HOST}/api/desk/*", "bypass"),
         ]))
+
+    def test_refuses_a_public_override_on_the_covering_destination(self):
+        desk = app("desk", f"{HOST}/api/desk/*", "allow")
+        desk["destinations"][0]["overrides"] = [{"behavior": "public", "path_pattern": "/api/desk/whoami"}]
+        for out in self.assert_refuses(fake_cloudflare([desk])):
+            self.assertIn("overrides", out)
 
     def test_an_exact_destination_beats_a_wildcard(self):
         self.assert_refuses(fake_cloudflare([
