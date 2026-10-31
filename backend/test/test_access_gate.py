@@ -153,6 +153,23 @@ class TestAccessGate(unittest.TestCase):
             app("desk", f"{HOST}/api/desk", "bypass"),
         ]))
 
+    def test_a_trailing_slash_on_a_path_without_a_wildcard_still_covers(self):
+        self.assert_passes(fake_cloudflare([app("desk", f"{HOST}/api/desk/", "allow")]))
+        self.assert_refuses(fake_cloudflare([
+            app("site", f"{HOST}/*", "allow"),
+            app("desk", f"{HOST}/api/desk/", "bypass"),
+        ]))
+
+    def test_a_mid_path_wildcard_does_not_hide_the_top_tier(self):
+        self.assert_refuses(fake_cloudflare([
+            app("any-whoami", f"{HOST}/api/*/whoami", "allow"),
+            app("desk", f"{HOST}/api/desk/*", "bypass"),
+        ]))
+        self.assert_passes(fake_cloudflare([
+            app("any-whoami", f"{HOST}/api/*/whoami", "allow"),
+            app("desk", f"{HOST}/api/desk/*", "allow"),
+        ]))
+
     def test_a_mid_path_wildcard_spans_segments_and_is_always_judged(self):
         self.assert_refuses(fake_cloudflare([
             app("whoami", f"{HOST}/api/desk/whoami", "allow"),
