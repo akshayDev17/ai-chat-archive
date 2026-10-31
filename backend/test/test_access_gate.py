@@ -146,6 +146,23 @@ class TestAccessGate(unittest.TestCase):
             app("whoami", f"https://{HOST}/api/desk/whoami", "allow"),
         ]))
 
+    def test_a_path_without_a_wildcard_covers_what_sits_under_it(self):
+        self.assert_passes(fake_cloudflare([app("desk", f"{HOST}/api/desk", "allow")]))
+        self.assert_refuses(fake_cloudflare([
+            app("site", f"{HOST}/*", "allow"),
+            app("desk", f"{HOST}/api/desk", "bypass"),
+        ]))
+
+    def test_a_mid_path_wildcard_spans_segments_and_is_always_judged(self):
+        self.assert_refuses(fake_cloudflare([
+            app("whoami", f"{HOST}/api/desk/whoami", "allow"),
+            app("any-whoami", f"{HOST}/api*/whoami", "bypass"),
+        ]))
+        self.assert_refuses(fake_cloudflare([
+            app("desk", f"{HOST}/api/desk/*", "allow"),
+            app("any-whoami", f"{HOST}/*/whoami", "bypass"),
+        ]))
+
     def test_a_tie_judges_every_app_in_it(self):
         self.assert_refuses(fake_cloudflare([
             app("site", HOST, "allow"),
