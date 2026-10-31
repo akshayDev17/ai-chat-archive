@@ -103,6 +103,37 @@ jobs:
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     environment: production
     steps:
+      # Refuse to deploy unless the write API is still behind the Cloudflare
+      # Access login. Reads are public and writes are private (README), so an
+      # anonymous request to /api/desk/* must be redirected to the team's
+      # cloudflareaccess.com login. A deploy that dropped that login would put
+      # the write API on the open internet. One step on purpose: a later change
+      # can swap it for `npx -y @akshaydev17/portfolio-app@<version> verify
+      # --path /api/desk/whoami` in one line.
+      - name: Check the path is behind the Cloudflare Access login
+        env:
+          ACCESS_TEAM: shiny-moon-6b37
+          ACCESS_PATH: /api/desk/whoami
+        run: |
+          url="https://akshayprabhakant.com$ACCESS_PATH"
+          out=$(curl -sS -o /dev/null --max-time 20 --retry 2 --retry-all-errors \
+            -w '%{http_code} %{redirect_url}' "$url") || {
+            echo "::error::$url did not answer, so the Access login cannot be confirmed"
+            exit 1
+          }
+          code=${out%% *}
+          location=${out#* }
+          host=$(printf '%s' "$location" | sed -E 's#^https://([^/:?]+).*#\1#')
+          case "$code" in
+            3??) ;;
+            *) host="" ;;
+          esac
+          if [ "$host" != "$ACCESS_TEAM.cloudflareaccess.com" ]; then
+            echo "::error::$url is not behind the Cloudflare Access login: expected a redirect to $ACCESS_TEAM.cloudflareaccess.com, got HTTP $code ${location:-with no Location}. Refusing to deploy."
+            exit 1
+          fi
+          echo "$url -> $code $host"
+
       - uses: actions/checkout@v6
       - uses: astral-sh/setup-uv@v6
 
@@ -218,6 +249,37 @@ jobs:
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     environment: production
     steps:
+      # Refuse to deploy unless the write API is still behind the Cloudflare
+      # Access login. Reads are public and writes are private (README), so an
+      # anonymous request to /api/desk/* must be redirected to the team's
+      # cloudflareaccess.com login. A deploy that dropped that login would put
+      # the write API on the open internet. One step on purpose: a later change
+      # can swap it for `npx -y @akshaydev17/portfolio-app@<version> verify
+      # --path /api/desk/whoami` in one line.
+      - name: Check the path is behind the Cloudflare Access login
+        env:
+          ACCESS_TEAM: shiny-moon-6b37
+          ACCESS_PATH: /api/desk/whoami
+        run: |
+          url="https://akshayprabhakant.com$ACCESS_PATH"
+          out=$(curl -sS -o /dev/null --max-time 20 --retry 2 --retry-all-errors \
+            -w '%{http_code} %{redirect_url}' "$url") || {
+            echo "::error::$url did not answer, so the Access login cannot be confirmed"
+            exit 1
+          }
+          code=${out%% *}
+          location=${out#* }
+          host=$(printf '%s' "$location" | sed -E 's#^https://([^/:?]+).*#\1#')
+          case "$code" in
+            3??) ;;
+            *) host="" ;;
+          esac
+          if [ "$host" != "$ACCESS_TEAM.cloudflareaccess.com" ]; then
+            echo "::error::$url is not behind the Cloudflare Access login: expected a redirect to $ACCESS_TEAM.cloudflareaccess.com, got HTTP $code ${location:-with no Location}. Refusing to deploy."
+            exit 1
+          fi
+          echo "$url -> $code $host"
+
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v4
         with:
