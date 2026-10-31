@@ -22,7 +22,7 @@ jobs:
       # test_decode.py fetches a live ChatGPT share page. Off in CI on purpose:
       # a build that goes red because a third party was slow, rate-limited us,
       # or decided our requests looked like a bot tells you nothing about the
-      # change under test. The other four backend tests are offline.
+      # change under test. The other backend tests are offline.
       ARCHIVE_LIVE_TESTS: "0"
     steps:
       - uses: actions/checkout@v6
@@ -98,36 +98,156 @@ jobs:
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     environment: production
     steps:
-      # Refuse to deploy unless the write API is still behind the Cloudflare
-      # Access login. Reads are public and writes are private (README), so an
-      # anonymous request to /api/desk/* must be redirected to the team's
-      # cloudflareaccess.com login. A deploy that dropped that login would put
-      # the write API on the open internet. One step on purpose: a later change
-      # can swap it for `npx -y @akshaydev17/portfolio-app@<version> verify
-      # --path /api/desk/whoami` in one line.
-      - name: Check the path is behind the Cloudflare Access login
+      # Refuse to deploy unless the write API is still behind Cloudflare Access.
+      # Reads are public and writes are private (README), so /api/desk/* must be
+      # covered by a self-hosted Access application with an allow policy. A
+      # deploy that dropped that would put the write API on the open internet.
+      #
+      # What this proves is narrower: /api/desk/whoami is served under an Access
+      # application with an Allow policy and no Bypass policy. It does not prove
+      # every /api/desk/ path is covered; a separate app on, say,
+      # /api/desk/ingest with a Bypass policy would not be seen.
+      #
+      # This asks the Cloudflare API rather than curling the path: Cloudflare
+      # answers GitHub's runners with a bare 403, not the 302 to the login that
+      # a browser gets, so the curl form could never pass here. It needs
+      # "Account · Access: Apps and Policies · Read" on the deploy token.
+      #   List apps:  https://developers.cloudflare.com/api/resources/zero_trust/subresources/access/subresources/applications/methods/list/
+      #   Get policy: https://developers.cloudflare.com/api/resources/zero_trust/subresources/access/subresources/policies/methods/get/
+      #   Permission: https://developers.cloudflare.com/fundamentals/api/reference/permissions/
+      # A self-hosted app lists what it covers in `destinations` (type public,
+      # `uri`), or in the deprecated `domain` / `self_hosted_domains`; each of its
+      # `policies` carries a `decision`, and one given by id alone is a reusable
+      # policy fetched on its own.
+      #
+      # Only the most specific covering app counts: "When multiple rules are set
+      # for a common root path, the more specific rule takes precedence."
+      #   https://developers.cloudflare.com/cloudflare-one/access-controls/policies/app-paths/
+      # So the exact path ranks first. A path with no wildcard also covers what
+      # sits under it: "If no separate, specific rule is set for
+      # `dashboard.com/eng/exec`, it will inherit any rules set for
+      # `dashboard.com/eng`." It ranks by its length, trailing `/` ignored, tied
+      # with the same path plus `/*`, so a longer prefix beats a shorter one and
+      # the bare domain ranks with `akshayprabhakant.com/*`. A tie judges every
+      # app in it. "Using a wildcard in the middle of the Path field covers
+      # multiple segments of the URL", so any other `*` spans segments; the
+      # docs do not rank it, so every app with such a covering destination is
+      # judged as well as the top tier. Each judged app must have an Allow policy and no
+      # Bypass policy, because Bypass is evaluated before Allow and lets
+      # everyone through.
+      #   https://developers.cloudflare.com/cloudflare-one/access-controls/policies/
+      # Nor may a destination of that app that covers the path carry any
+      # `overrides`: "Each rule can make a matching path public, bypassing
+      # Access authentication." The docs do not say whether `path_pattern` is
+      # relative to the destination `uri`, so any override refuses.
+      #   https://developers.cloudflare.com/api/resources/zero_trust/subresources/access/subresources/applications/methods/create/
+      # One step on purpose: a later change can swap
+      # it for `npx -y @akshaydev17/portfolio-app@<version> verify --path
+      # /api/desk/whoami` in one line.
+      - name: Check the path is behind Cloudflare Access
         env:
-          ACCESS_TEAM: shiny-moon-6b37
           ACCESS_PATH: /api/desk/whoami
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
-          url="https://akshayprabhakant.com$ACCESS_PATH"
-          out=$(curl -sS -o /dev/null --max-time 20 --retry 2 --retry-all-errors \
-            -w '%{http_code} %{redirect_url}' "$url") || {
-            echo "::error::$url did not answer, so the Access login cannot be confirmed"
-            exit 1
-          }
-          code=${out%% *}
-          location=${out#* }
-          host=$(printf '%s' "$location" | sed -E 's#^https://([^/:?]+).*#\1#')
-          case "$code" in
-            3??) ;;
-            *) host="" ;;
-          esac
-          if [ "$host" != "$ACCESS_TEAM.cloudflareaccess.com" ]; then
-            echo "::error::$url is not behind the Cloudflare Access login: expected a redirect to $ACCESS_TEAM.cloudflareaccess.com, got HTTP $code ${location:-with no Location}. Refusing to deploy."
-            exit 1
-          fi
-          echo "$url -> $code $host"
+          python3 - <<'PY'
+          import json, os, re, sys, urllib.error, urllib.request
+
+          api = "https://api.cloudflare.com/client/v4"
+          account = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "")
+          token = os.environ.get("CLOUDFLARE_API_TOKEN", "")
+          host = "akshayprabhakant.com"
+          target = host + os.environ["ACCESS_PATH"]
+          need = "Account · Access: Apps and Policies · Read"
+
+          def fail(msg):
+              print(f"::error::{msg}")
+              sys.exit(1)
+
+          if not token or not account:
+              fail("CLOUDFLARE_API_TOKEN or CLOUDFLARE_ACCOUNT_ID is not set, so the Access login cannot be confirmed. Refusing to deploy.")
+
+          def get(path):
+              req = urllib.request.Request(api + path, headers={"Authorization": f"Bearer {token}"})
+              try:
+                  with urllib.request.urlopen(req, timeout=20) as r:
+                      body = json.load(r)
+              except urllib.error.HTTPError as e:
+                  try:
+                      body = json.load(e)
+                  except ValueError:
+                      body = {"errors": [{"message": f"HTTP {e.code}"}]}
+                  codes = {err.get("code") for err in body.get("errors") or []}
+                  if e.code in (401, 403) or 10000 in codes:
+                      fail(f"The deploy token cannot read Cloudflare Access applications (HTTP {e.code}). Find the deploy token under My Profile → API Tokens if it is a user token, or Manage Account → Account API Tokens if it is an account token; Edit it, add '{need}', and save. The token value and the GitHub secret do not change. Refusing to deploy.")
+                  fail(f"Cloudflare answered HTTP {e.code} for {path}: {json.dumps(body.get('errors'))[:400]}")
+              except (urllib.error.URLError, TimeoutError) as e:
+                  fail(f"The Cloudflare API did not answer ({e}), so the Access login cannot be confirmed")
+              if not body.get("success"):
+                  fail(f"Cloudflare refused {path}: {json.dumps(body.get('errors'))[:400]}")
+              return body
+
+          midpath = (0, 0)
+
+          def specificity(uri):
+              uri = uri.split("://", 1)[-1].lower()
+              if "*" not in uri:
+                  uri = uri.rstrip("/")
+                  if uri == target:
+                      return (2, len(target))
+                  return (1, len(uri)) if target.startswith(uri + "/") else None
+              if uri.endswith("/*") and "*" not in uri[:-2]:
+                  return (1, len(uri) - 2) if target.startswith(uri[:-1]) else None
+              pattern = ".*".join(re.escape(part) for part in uri.split("*"))
+              return midpath if re.fullmatch(pattern, target) else None
+
+          def overridden(app):
+              return any(d.get("overrides") and specificity(d.get("uri", "")) for d in app.get("destinations") or [])
+
+          def decisions(app):
+              found = set()
+              for p in app.get("policies") or []:
+                  if isinstance(p, str):
+                      p = {"id": p}
+                  if "decision" not in p and p.get("id"):
+                      p = get(f"/accounts/{account}/access/policies/{p['id']}")["result"]
+                  found.add(p.get("decision"))
+              return found
+
+          apps, page = [], 1
+          while True:
+              body = get(f"/accounts/{account}/access/apps?page={page}&per_page=100")
+              result = body.get("result") or []
+              apps += result
+              total = (body.get("result_info") or {}).get("total_pages")
+              if (page >= total) if total else len(result) < 100:
+                  break
+              page += 1
+
+          ranked = []
+          for app in apps:
+              if app.get("type") != "self_hosted":
+                  continue
+              uris = [d.get("uri", "") for d in app.get("destinations") or [] if d.get("type", "public") == "public"]
+              uris += [app.get("domain") or ""] + list(app.get("self_hosted_domains") or [])
+              ranks = [r for r in (specificity(u) for u in uris if u) if r]
+              if ranks:
+                  ranked.append((ranks, app))
+
+          if not ranked:
+              fail(f"No self-hosted Cloudflare Access application covers {target}, so it would be on the open internet. Refusing to deploy.")
+          top = max(max(ranks) for ranks, _ in ranked)
+          judged = [app for ranks, app in ranked if max(ranks) == top or midpath in ranks]
+          for app in judged:
+              if overridden(app):
+                  fail(f"{target} is served by the Access application '{app.get('name')}', whose destination covering it has overrides that can make paths public. Refusing to deploy.")
+              found = decisions(app)
+              if "bypass" in found:
+                  fail(f"{target} is served by the Access application '{app.get('name')}', which has a Bypass policy, so anyone can reach it. Refusing to deploy.")
+              if "allow" not in found:
+                  fail(f"{target} is served by the Access application '{app.get('name')}', which has no Allow policy. Refusing to deploy.")
+          print(f"{target} is served by the Access application(s) {', '.join(repr(app.get('name')) for app in judged)} with an Allow policy and no Bypass policy")
+          PY
 
       - uses: actions/checkout@v6
       - uses: astral-sh/setup-uv@v6
@@ -244,36 +364,156 @@ jobs:
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     environment: production
     steps:
-      # Refuse to deploy unless the write API is still behind the Cloudflare
-      # Access login. Reads are public and writes are private (README), so an
-      # anonymous request to /api/desk/* must be redirected to the team's
-      # cloudflareaccess.com login. A deploy that dropped that login would put
-      # the write API on the open internet. One step on purpose: a later change
-      # can swap it for `npx -y @akshaydev17/portfolio-app@<version> verify
-      # --path /api/desk/whoami` in one line.
-      - name: Check the path is behind the Cloudflare Access login
+      # Refuse to deploy unless the write API is still behind Cloudflare Access.
+      # Reads are public and writes are private (README), so /api/desk/* must be
+      # covered by a self-hosted Access application with an allow policy. A
+      # deploy that dropped that would put the write API on the open internet.
+      #
+      # What this proves is narrower: /api/desk/whoami is served under an Access
+      # application with an Allow policy and no Bypass policy. It does not prove
+      # every /api/desk/ path is covered; a separate app on, say,
+      # /api/desk/ingest with a Bypass policy would not be seen.
+      #
+      # This asks the Cloudflare API rather than curling the path: Cloudflare
+      # answers GitHub's runners with a bare 403, not the 302 to the login that
+      # a browser gets, so the curl form could never pass here. It needs
+      # "Account · Access: Apps and Policies · Read" on the deploy token.
+      #   List apps:  https://developers.cloudflare.com/api/resources/zero_trust/subresources/access/subresources/applications/methods/list/
+      #   Get policy: https://developers.cloudflare.com/api/resources/zero_trust/subresources/access/subresources/policies/methods/get/
+      #   Permission: https://developers.cloudflare.com/fundamentals/api/reference/permissions/
+      # A self-hosted app lists what it covers in `destinations` (type public,
+      # `uri`), or in the deprecated `domain` / `self_hosted_domains`; each of its
+      # `policies` carries a `decision`, and one given by id alone is a reusable
+      # policy fetched on its own.
+      #
+      # Only the most specific covering app counts: "When multiple rules are set
+      # for a common root path, the more specific rule takes precedence."
+      #   https://developers.cloudflare.com/cloudflare-one/access-controls/policies/app-paths/
+      # So the exact path ranks first. A path with no wildcard also covers what
+      # sits under it: "If no separate, specific rule is set for
+      # `dashboard.com/eng/exec`, it will inherit any rules set for
+      # `dashboard.com/eng`." It ranks by its length, trailing `/` ignored, tied
+      # with the same path plus `/*`, so a longer prefix beats a shorter one and
+      # the bare domain ranks with `akshayprabhakant.com/*`. A tie judges every
+      # app in it. "Using a wildcard in the middle of the Path field covers
+      # multiple segments of the URL", so any other `*` spans segments; the
+      # docs do not rank it, so every app with such a covering destination is
+      # judged as well as the top tier. Each judged app must have an Allow policy and no
+      # Bypass policy, because Bypass is evaluated before Allow and lets
+      # everyone through.
+      #   https://developers.cloudflare.com/cloudflare-one/access-controls/policies/
+      # Nor may a destination of that app that covers the path carry any
+      # `overrides`: "Each rule can make a matching path public, bypassing
+      # Access authentication." The docs do not say whether `path_pattern` is
+      # relative to the destination `uri`, so any override refuses.
+      #   https://developers.cloudflare.com/api/resources/zero_trust/subresources/access/subresources/applications/methods/create/
+      # One step on purpose: a later change can swap
+      # it for `npx -y @akshaydev17/portfolio-app@<version> verify --path
+      # /api/desk/whoami` in one line.
+      - name: Check the path is behind Cloudflare Access
         env:
-          ACCESS_TEAM: shiny-moon-6b37
           ACCESS_PATH: /api/desk/whoami
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
-          url="https://akshayprabhakant.com$ACCESS_PATH"
-          out=$(curl -sS -o /dev/null --max-time 20 --retry 2 --retry-all-errors \
-            -w '%{http_code} %{redirect_url}' "$url") || {
-            echo "::error::$url did not answer, so the Access login cannot be confirmed"
-            exit 1
-          }
-          code=${out%% *}
-          location=${out#* }
-          host=$(printf '%s' "$location" | sed -E 's#^https://([^/:?]+).*#\1#')
-          case "$code" in
-            3??) ;;
-            *) host="" ;;
-          esac
-          if [ "$host" != "$ACCESS_TEAM.cloudflareaccess.com" ]; then
-            echo "::error::$url is not behind the Cloudflare Access login: expected a redirect to $ACCESS_TEAM.cloudflareaccess.com, got HTTP $code ${location:-with no Location}. Refusing to deploy."
-            exit 1
-          fi
-          echo "$url -> $code $host"
+          python3 - <<'PY'
+          import json, os, re, sys, urllib.error, urllib.request
+
+          api = "https://api.cloudflare.com/client/v4"
+          account = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "")
+          token = os.environ.get("CLOUDFLARE_API_TOKEN", "")
+          host = "akshayprabhakant.com"
+          target = host + os.environ["ACCESS_PATH"]
+          need = "Account · Access: Apps and Policies · Read"
+
+          def fail(msg):
+              print(f"::error::{msg}")
+              sys.exit(1)
+
+          if not token or not account:
+              fail("CLOUDFLARE_API_TOKEN or CLOUDFLARE_ACCOUNT_ID is not set, so the Access login cannot be confirmed. Refusing to deploy.")
+
+          def get(path):
+              req = urllib.request.Request(api + path, headers={"Authorization": f"Bearer {token}"})
+              try:
+                  with urllib.request.urlopen(req, timeout=20) as r:
+                      body = json.load(r)
+              except urllib.error.HTTPError as e:
+                  try:
+                      body = json.load(e)
+                  except ValueError:
+                      body = {"errors": [{"message": f"HTTP {e.code}"}]}
+                  codes = {err.get("code") for err in body.get("errors") or []}
+                  if e.code in (401, 403) or 10000 in codes:
+                      fail(f"The deploy token cannot read Cloudflare Access applications (HTTP {e.code}). Find the deploy token under My Profile → API Tokens if it is a user token, or Manage Account → Account API Tokens if it is an account token; Edit it, add '{need}', and save. The token value and the GitHub secret do not change. Refusing to deploy.")
+                  fail(f"Cloudflare answered HTTP {e.code} for {path}: {json.dumps(body.get('errors'))[:400]}")
+              except (urllib.error.URLError, TimeoutError) as e:
+                  fail(f"The Cloudflare API did not answer ({e}), so the Access login cannot be confirmed")
+              if not body.get("success"):
+                  fail(f"Cloudflare refused {path}: {json.dumps(body.get('errors'))[:400]}")
+              return body
+
+          midpath = (0, 0)
+
+          def specificity(uri):
+              uri = uri.split("://", 1)[-1].lower()
+              if "*" not in uri:
+                  uri = uri.rstrip("/")
+                  if uri == target:
+                      return (2, len(target))
+                  return (1, len(uri)) if target.startswith(uri + "/") else None
+              if uri.endswith("/*") and "*" not in uri[:-2]:
+                  return (1, len(uri) - 2) if target.startswith(uri[:-1]) else None
+              pattern = ".*".join(re.escape(part) for part in uri.split("*"))
+              return midpath if re.fullmatch(pattern, target) else None
+
+          def overridden(app):
+              return any(d.get("overrides") and specificity(d.get("uri", "")) for d in app.get("destinations") or [])
+
+          def decisions(app):
+              found = set()
+              for p in app.get("policies") or []:
+                  if isinstance(p, str):
+                      p = {"id": p}
+                  if "decision" not in p and p.get("id"):
+                      p = get(f"/accounts/{account}/access/policies/{p['id']}")["result"]
+                  found.add(p.get("decision"))
+              return found
+
+          apps, page = [], 1
+          while True:
+              body = get(f"/accounts/{account}/access/apps?page={page}&per_page=100")
+              result = body.get("result") or []
+              apps += result
+              total = (body.get("result_info") or {}).get("total_pages")
+              if (page >= total) if total else len(result) < 100:
+                  break
+              page += 1
+
+          ranked = []
+          for app in apps:
+              if app.get("type") != "self_hosted":
+                  continue
+              uris = [d.get("uri", "") for d in app.get("destinations") or [] if d.get("type", "public") == "public"]
+              uris += [app.get("domain") or ""] + list(app.get("self_hosted_domains") or [])
+              ranks = [r for r in (specificity(u) for u in uris if u) if r]
+              if ranks:
+                  ranked.append((ranks, app))
+
+          if not ranked:
+              fail(f"No self-hosted Cloudflare Access application covers {target}, so it would be on the open internet. Refusing to deploy.")
+          top = max(max(ranks) for ranks, _ in ranked)
+          judged = [app for ranks, app in ranked if max(ranks) == top or midpath in ranks]
+          for app in judged:
+              if overridden(app):
+                  fail(f"{target} is served by the Access application '{app.get('name')}', whose destination covering it has overrides that can make paths public. Refusing to deploy.")
+              found = decisions(app)
+              if "bypass" in found:
+                  fail(f"{target} is served by the Access application '{app.get('name')}', which has a Bypass policy, so anyone can reach it. Refusing to deploy.")
+              if "allow" not in found:
+                  fail(f"{target} is served by the Access application '{app.get('name')}', which has no Allow policy. Refusing to deploy.")
+          print(f"{target} is served by the Access application(s) {', '.join(repr(app.get('name')) for app in judged)} with an Allow policy and no Bypass policy")
+          PY
 
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v4
