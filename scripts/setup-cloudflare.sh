@@ -276,6 +276,7 @@ stage "API token — with D1 added by hand"
   step "Account Resources: include your account."
   step "Zone Resources: include $DOMAIN."
   step "Still in Permissions, press '+ Add more' and add:  Account · D1 · Edit"
+  step "And add:  Account · Access: Apps and Policies · Read  (CI checks Access still guards /api/desk/*)"
   step "Continue to summary → Create Token → copy it."
   ask_secret CLOUDFLARE_API_TOKEN "Paste the token:"
 

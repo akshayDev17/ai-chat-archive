@@ -339,6 +339,14 @@ Two secrets, from **Account API tokens → Create Token → Edit Cloudflare Work
 > cannot run.
 > — <https://developers.cloudflare.com/fundamentals/api/reference/template/>
 
+> **Add `Access: Apps and Policies Read` too.** Both deploy jobs first ask the
+> Cloudflare API whether a self-hosted Access application with an allow policy
+> still covers `/api/desk/whoami`, and refuse to deploy otherwise. Add it to the
+> existing token: My Profile → API Tokens → Edit on the deploy token → Add more
+> → Account · Access: Apps and Policies · Read → Continue to summary → Update
+> token. The token value, and so the GitHub secret, do not change.
+> — <https://developers.cloudflare.com/fundamentals/api/reference/permissions/>
+
 The docs on storing it: "Don't store the value of `CLOUDFLARE_API_TOKEN` in your
 repository, as it gives access to deploy Workers on your account."
 — <https://developers.cloudflare.com/workers/ci-cd/external-cicd/github-actions/>
@@ -348,9 +356,10 @@ repository, as it gives access to deploy Workers on your account."
 - **`test`** — runs on every push and pull request. Backend tests twice, once as
   scripts and once through pytest, then `npm ci`, `npm run test:lib`,
   `tsc --noEmit` and `npm run build:check`.
-- **`deploy-api`** — `main` only, after `test` passes: a check that an
-  anonymous request to `/api/desk/whoami` still redirects to the
-  `cloudflareaccess.com` login (no redirect, no deploy), a secrets check, a D1
+- **`deploy-api`** — `main` only, after `test` passes: a check, through
+  the Cloudflare API, that a self-hosted Access application with an allow
+  policy still covers `/api/desk/whoami` (no coverage, no deploy), a secrets
+  check, a D1
   permission check, an R2 bucket check, `d1 migrations apply --remote`,
   `pywrangler deploy`, then a health check against the deployed Worker.
 
@@ -359,7 +368,7 @@ workflow sets `ARCHIVE_LIVE_TESTS=0` so it skips itself. A build that goes red
 because ChatGPT rate-limited us, or decided runner traffic looked like a bot,
 says nothing about the change under test.
 
-A **`deploy-frontend`** job is built: the same Access login check →
+A **`deploy-frontend`** job is built: the same Access check →
 `npm ci` → static-export build
 (`NEXT_PUBLIC_API_BASE='' npm run build`) → `npx wrangler deploy` (the frontend
 Worker) → verify `/chat-archives` and a story URL both answer 200.

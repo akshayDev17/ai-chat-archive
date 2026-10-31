@@ -98,36 +98,109 @@ jobs:
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     environment: production
     steps:
-      # Refuse to deploy unless the write API is still behind the Cloudflare
-      # Access login. Reads are public and writes are private (README), so an
-      # anonymous request to /api/desk/* must be redirected to the team's
-      # cloudflareaccess.com login. A deploy that dropped that login would put
-      # the write API on the open internet. One step on purpose: a later change
-      # can swap it for `npx -y @akshaydev17/portfolio-app@<version> verify
-      # --path /api/desk/whoami` in one line.
-      - name: Check the path is behind the Cloudflare Access login
+      # Refuse to deploy unless the write API is still behind Cloudflare Access.
+      # Reads are public and writes are private (README), so /api/desk/* must be
+      # covered by a self-hosted Access application with an allow policy. A
+      # deploy that dropped that would put the write API on the open internet.
+      #
+      # This asks the Cloudflare API rather than curling the path: Cloudflare
+      # answers GitHub's runners with a bare 403, not the 302 to the login that
+      # a browser gets, so the curl form could never pass here. It needs
+      # "Account · Access: Apps and Policies · Read" on the deploy token.
+      #   List apps:  https://developers.cloudflare.com/api/resources/zero_trust/subresources/access/subresources/applications/methods/list/
+      #   Get policy: https://developers.cloudflare.com/api/resources/zero_trust/subresources/access/subresources/policies/methods/get/
+      #   Permission: https://developers.cloudflare.com/fundamentals/api/reference/permissions/
+      # A self-hosted app lists what it covers in `destinations` (type public,
+      # `uri`), or in the deprecated `domain` / `self_hosted_domains`; each of its
+      # `policies` carries a `decision`, and one given by id alone is a reusable
+      # policy fetched on its own. One step on purpose: a later change can swap
+      # it for `npx -y @akshaydev17/portfolio-app@<version> verify --path
+      # /api/desk/whoami` in one line.
+      - name: Check the path is behind Cloudflare Access
         env:
-          ACCESS_TEAM: shiny-moon-6b37
           ACCESS_PATH: /api/desk/whoami
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
-          url="https://akshayprabhakant.com$ACCESS_PATH"
-          out=$(curl -sS -o /dev/null --max-time 20 --retry 2 --retry-all-errors \
-            -w '%{http_code} %{redirect_url}' "$url") || {
-            echo "::error::$url did not answer, so the Access login cannot be confirmed"
-            exit 1
-          }
-          code=${out%% *}
-          location=${out#* }
-          host=$(printf '%s' "$location" | sed -E 's#^https://([^/:?]+).*#\1#')
-          case "$code" in
-            3??) ;;
-            *) host="" ;;
-          esac
-          if [ "$host" != "$ACCESS_TEAM.cloudflareaccess.com" ]; then
-            echo "::error::$url is not behind the Cloudflare Access login: expected a redirect to $ACCESS_TEAM.cloudflareaccess.com, got HTTP $code ${location:-with no Location}. Refusing to deploy."
-            exit 1
-          fi
-          echo "$url -> $code $host"
+          python3 - <<'PY'
+          import json, os, sys, urllib.error, urllib.request
+
+          api = os.environ.get("CF_API_BASE", "https://api.cloudflare.com/client/v4")
+          account = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "")
+          token = os.environ.get("CLOUDFLARE_API_TOKEN", "")
+          target = "akshayprabhakant.com" + os.environ["ACCESS_PATH"]
+          need = "Account · Access: Apps and Policies · Read"
+
+          def fail(msg):
+              print(f"::error::{msg}")
+              sys.exit(1)
+
+          if not token or not account:
+              fail("CLOUDFLARE_API_TOKEN or CLOUDFLARE_ACCOUNT_ID is not set, so the Access login cannot be confirmed. Refusing to deploy.")
+
+          def get(path):
+              req = urllib.request.Request(api + path, headers={"Authorization": f"Bearer {token}"})
+              try:
+                  with urllib.request.urlopen(req, timeout=20) as r:
+                      body = json.load(r)
+              except urllib.error.HTTPError as e:
+                  try:
+                      body = json.load(e)
+                  except ValueError:
+                      body = {"errors": [{"message": f"HTTP {e.code}"}]}
+                  codes = {err.get("code") for err in body.get("errors") or []}
+                  if e.code in (401, 403) or 10000 in codes:
+                      fail(f"The deploy token cannot read Cloudflare Access applications (HTTP {e.code}). Add '{need}' to it under My Profile → API Tokens → Edit; the token value does not change. Refusing to deploy.")
+                  fail(f"Cloudflare answered HTTP {e.code} for {path}: {json.dumps(body.get('errors'))[:400]}")
+              except (urllib.error.URLError, TimeoutError) as e:
+                  fail(f"The Cloudflare API did not answer ({e}), so the Access login cannot be confirmed")
+              if not body.get("success"):
+                  fail(f"Cloudflare refused {path}: {json.dumps(body.get('errors'))[:400]}")
+              return body
+
+          def covers(uri):
+              uri = uri.split("://", 1)[-1].lower()
+              if uri == target or uri == "akshayprabhakant.com":
+                  return True
+              return uri.endswith("/*") and target.startswith(uri[:-1])
+
+          def allows(app):
+              for p in app.get("policies") or []:
+                  if isinstance(p, str):
+                      p = {"id": p}
+                  if "decision" not in p and p.get("id"):
+                      p = get(f"/accounts/{account}/access/policies/{p['id']}")["result"]
+                  if p.get("decision") == "allow":
+                      return True
+              return False
+
+          apps, page = [], 1
+          while True:
+              body = get(f"/accounts/{account}/access/apps?page={page}&per_page=100")
+              result = body.get("result") or []
+              apps += result
+              total = (body.get("result_info") or {}).get("total_pages")
+              if (page >= total) if total else len(result) < 100:
+                  break
+              page += 1
+
+          covering = []
+          for app in apps:
+              if app.get("type") != "self_hosted":
+                  continue
+              uris = [d.get("uri", "") for d in app.get("destinations") or [] if d.get("type", "public") == "public"]
+              uris += [app.get("domain") or ""] + list(app.get("self_hosted_domains") or [])
+              if any(covers(u) for u in uris if u):
+                  covering.append(app)
+
+          if not covering:
+              fail(f"No self-hosted Cloudflare Access application covers {target}, so it would be on the open internet. Refusing to deploy.")
+          for app in covering:
+              if allows(app):
+                  print(f"{target} is covered by the Access application '{app.get('name')}' with an allow policy")
+                  sys.exit(0)
+          fail(f"{target} is covered by the Access application(s) {', '.join(repr(a.get('name')) for a in covering)}, but none has an allow policy. Refusing to deploy.")
+          PY
 
       - uses: actions/checkout@v6
       - uses: astral-sh/setup-uv@v6
@@ -244,36 +317,109 @@ jobs:
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     environment: production
     steps:
-      # Refuse to deploy unless the write API is still behind the Cloudflare
-      # Access login. Reads are public and writes are private (README), so an
-      # anonymous request to /api/desk/* must be redirected to the team's
-      # cloudflareaccess.com login. A deploy that dropped that login would put
-      # the write API on the open internet. One step on purpose: a later change
-      # can swap it for `npx -y @akshaydev17/portfolio-app@<version> verify
-      # --path /api/desk/whoami` in one line.
-      - name: Check the path is behind the Cloudflare Access login
+      # Refuse to deploy unless the write API is still behind Cloudflare Access.
+      # Reads are public and writes are private (README), so /api/desk/* must be
+      # covered by a self-hosted Access application with an allow policy. A
+      # deploy that dropped that would put the write API on the open internet.
+      #
+      # This asks the Cloudflare API rather than curling the path: Cloudflare
+      # answers GitHub's runners with a bare 403, not the 302 to the login that
+      # a browser gets, so the curl form could never pass here. It needs
+      # "Account · Access: Apps and Policies · Read" on the deploy token.
+      #   List apps:  https://developers.cloudflare.com/api/resources/zero_trust/subresources/access/subresources/applications/methods/list/
+      #   Get policy: https://developers.cloudflare.com/api/resources/zero_trust/subresources/access/subresources/policies/methods/get/
+      #   Permission: https://developers.cloudflare.com/fundamentals/api/reference/permissions/
+      # A self-hosted app lists what it covers in `destinations` (type public,
+      # `uri`), or in the deprecated `domain` / `self_hosted_domains`; each of its
+      # `policies` carries a `decision`, and one given by id alone is a reusable
+      # policy fetched on its own. One step on purpose: a later change can swap
+      # it for `npx -y @akshaydev17/portfolio-app@<version> verify --path
+      # /api/desk/whoami` in one line.
+      - name: Check the path is behind Cloudflare Access
         env:
-          ACCESS_TEAM: shiny-moon-6b37
           ACCESS_PATH: /api/desk/whoami
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
-          url="https://akshayprabhakant.com$ACCESS_PATH"
-          out=$(curl -sS -o /dev/null --max-time 20 --retry 2 --retry-all-errors \
-            -w '%{http_code} %{redirect_url}' "$url") || {
-            echo "::error::$url did not answer, so the Access login cannot be confirmed"
-            exit 1
-          }
-          code=${out%% *}
-          location=${out#* }
-          host=$(printf '%s' "$location" | sed -E 's#^https://([^/:?]+).*#\1#')
-          case "$code" in
-            3??) ;;
-            *) host="" ;;
-          esac
-          if [ "$host" != "$ACCESS_TEAM.cloudflareaccess.com" ]; then
-            echo "::error::$url is not behind the Cloudflare Access login: expected a redirect to $ACCESS_TEAM.cloudflareaccess.com, got HTTP $code ${location:-with no Location}. Refusing to deploy."
-            exit 1
-          fi
-          echo "$url -> $code $host"
+          python3 - <<'PY'
+          import json, os, sys, urllib.error, urllib.request
+
+          api = os.environ.get("CF_API_BASE", "https://api.cloudflare.com/client/v4")
+          account = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "")
+          token = os.environ.get("CLOUDFLARE_API_TOKEN", "")
+          target = "akshayprabhakant.com" + os.environ["ACCESS_PATH"]
+          need = "Account · Access: Apps and Policies · Read"
+
+          def fail(msg):
+              print(f"::error::{msg}")
+              sys.exit(1)
+
+          if not token or not account:
+              fail("CLOUDFLARE_API_TOKEN or CLOUDFLARE_ACCOUNT_ID is not set, so the Access login cannot be confirmed. Refusing to deploy.")
+
+          def get(path):
+              req = urllib.request.Request(api + path, headers={"Authorization": f"Bearer {token}"})
+              try:
+                  with urllib.request.urlopen(req, timeout=20) as r:
+                      body = json.load(r)
+              except urllib.error.HTTPError as e:
+                  try:
+                      body = json.load(e)
+                  except ValueError:
+                      body = {"errors": [{"message": f"HTTP {e.code}"}]}
+                  codes = {err.get("code") for err in body.get("errors") or []}
+                  if e.code in (401, 403) or 10000 in codes:
+                      fail(f"The deploy token cannot read Cloudflare Access applications (HTTP {e.code}). Add '{need}' to it under My Profile → API Tokens → Edit; the token value does not change. Refusing to deploy.")
+                  fail(f"Cloudflare answered HTTP {e.code} for {path}: {json.dumps(body.get('errors'))[:400]}")
+              except (urllib.error.URLError, TimeoutError) as e:
+                  fail(f"The Cloudflare API did not answer ({e}), so the Access login cannot be confirmed")
+              if not body.get("success"):
+                  fail(f"Cloudflare refused {path}: {json.dumps(body.get('errors'))[:400]}")
+              return body
+
+          def covers(uri):
+              uri = uri.split("://", 1)[-1].lower()
+              if uri == target or uri == "akshayprabhakant.com":
+                  return True
+              return uri.endswith("/*") and target.startswith(uri[:-1])
+
+          def allows(app):
+              for p in app.get("policies") or []:
+                  if isinstance(p, str):
+                      p = {"id": p}
+                  if "decision" not in p and p.get("id"):
+                      p = get(f"/accounts/{account}/access/policies/{p['id']}")["result"]
+                  if p.get("decision") == "allow":
+                      return True
+              return False
+
+          apps, page = [], 1
+          while True:
+              body = get(f"/accounts/{account}/access/apps?page={page}&per_page=100")
+              result = body.get("result") or []
+              apps += result
+              total = (body.get("result_info") or {}).get("total_pages")
+              if (page >= total) if total else len(result) < 100:
+                  break
+              page += 1
+
+          covering = []
+          for app in apps:
+              if app.get("type") != "self_hosted":
+                  continue
+              uris = [d.get("uri", "") for d in app.get("destinations") or [] if d.get("type", "public") == "public"]
+              uris += [app.get("domain") or ""] + list(app.get("self_hosted_domains") or [])
+              if any(covers(u) for u in uris if u):
+                  covering.append(app)
+
+          if not covering:
+              fail(f"No self-hosted Cloudflare Access application covers {target}, so it would be on the open internet. Refusing to deploy.")
+          for app in covering:
+              if allows(app):
+                  print(f"{target} is covered by the Access application '{app.get('name')}' with an allow policy")
+                  sys.exit(0)
+          fail(f"{target} is covered by the Access application(s) {', '.join(repr(a.get('name')) for a in covering)}, but none has an allow policy. Refusing to deploy.")
+          PY
 
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v4
