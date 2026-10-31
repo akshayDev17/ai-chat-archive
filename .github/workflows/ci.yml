@@ -103,6 +103,11 @@ jobs:
       # covered by a self-hosted Access application with an allow policy. A
       # deploy that dropped that would put the write API on the open internet.
       #
+      # What this proves is narrower: /api/desk/whoami is served under an Access
+      # application with an Allow policy and no Bypass policy. It does not prove
+      # every /api/desk/ path is covered; a separate app on, say,
+      # /api/desk/ingest with a Bypass policy would not be seen.
+      #
       # This asks the Cloudflare API rather than curling the path: Cloudflare
       # answers GitHub's runners with a bare 403, not the 302 to the login that
       # a browser gets, so the curl form could never pass here. It needs
@@ -343,6 +348,11 @@ jobs:
       # Reads are public and writes are private (README), so /api/desk/* must be
       # covered by a self-hosted Access application with an allow policy. A
       # deploy that dropped that would put the write API on the open internet.
+      #
+      # What this proves is narrower: /api/desk/whoami is served under an Access
+      # application with an Allow policy and no Bypass policy. It does not prove
+      # every /api/desk/ path is covered; a separate app on, say,
+      # /api/desk/ingest with a Bypass policy would not be seen.
       #
       # This asks the Cloudflare API rather than curling the path: Cloudflare
       # answers GitHub's runners with a bare 403, not the 302 to the login that

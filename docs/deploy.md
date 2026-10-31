@@ -342,7 +342,9 @@ Two secrets, from **Account API tokens → Create Token → Edit Cloudflare Work
 > **Add `Access: Apps and Policies Read` too.** Both deploy jobs first ask the
 > Cloudflare API which self-hosted Access application most specifically covers
 > `/api/desk/whoami`, and refuse to deploy unless it has an Allow policy and no
-> Bypass policy. Add the permission to the existing token: find the deploy token
+> Bypass policy. That proves `/api/desk/whoami` is served under such an
+> application, not that every `/api/desk/` path is. Add the permission to the
+> existing token: find the deploy token
 > under My Profile → API Tokens if it is a user token, or Manage Account →
 > Account API Tokens if it is an account token; Edit it, add Account · Access:
 > Apps and Policies · Read, and save. The token value and the GitHub secret do
