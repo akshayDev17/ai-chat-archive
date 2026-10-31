@@ -278,6 +278,7 @@ stage "API token — with D1 added by hand"
   step "Still in Permissions, press '+ Add more' and add:  Account · D1 · Edit"
   step "And add:  Account · Access: Apps and Policies · Read  (CI checks Access still guards /api/desk/*)"
   step "Continue to summary → Create Token → copy it."
+  step "Already have the deploy token? Find it under My Profile → API Tokens if it is a user token, or Manage Account → Account API Tokens if it is an account token; Edit it, add Account · Access: Apps and Policies · Read, and save. The token value and the GitHub secret do not change."
   ask_secret CLOUDFLARE_API_TOKEN "Paste the token:"
 
   if [[ -z "${CLOUDFLARE_API_TOKEN:-}" ]]; then

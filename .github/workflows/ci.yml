@@ -113,7 +113,18 @@ jobs:
       # A self-hosted app lists what it covers in `destinations` (type public,
       # `uri`), or in the deprecated `domain` / `self_hosted_domains`; each of its
       # `policies` carries a `decision`, and one given by id alone is a reusable
-      # policy fetched on its own. One step on purpose: a later change can swap
+      # policy fetched on its own.
+      #
+      # Only the most specific covering app counts: "When multiple rules are set
+      # for a common root path, the more specific rule takes precedence."
+      #   https://developers.cloudflare.com/cloudflare-one/access-controls/policies/app-paths/
+      # So an exact destination beats a wildcard, a longer wildcard prefix beats
+      # a shorter one, and the bare domain ranks with `akshayprabhakant.com/*`;
+      # a tie judges every app in it. That app must have an Allow policy and no
+      # Bypass policy, because Bypass is evaluated before Allow and lets
+      # everyone through.
+      #   https://developers.cloudflare.com/cloudflare-one/access-controls/policies/
+      # One step on purpose: a later change can swap
       # it for `npx -y @akshaydev17/portfolio-app@<version> verify --path
       # /api/desk/whoami` in one line.
       - name: Check the path is behind Cloudflare Access
@@ -125,10 +136,11 @@ jobs:
           python3 - <<'PY'
           import json, os, sys, urllib.error, urllib.request
 
-          api = os.environ.get("CF_API_BASE", "https://api.cloudflare.com/client/v4")
+          api = "https://api.cloudflare.com/client/v4"
           account = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "")
           token = os.environ.get("CLOUDFLARE_API_TOKEN", "")
-          target = "akshayprabhakant.com" + os.environ["ACCESS_PATH"]
+          host = "akshayprabhakant.com"
+          target = host + os.environ["ACCESS_PATH"]
           need = "Account · Access: Apps and Policies · Read"
 
           def fail(msg):
@@ -150,7 +162,7 @@ jobs:
                       body = {"errors": [{"message": f"HTTP {e.code}"}]}
                   codes = {err.get("code") for err in body.get("errors") or []}
                   if e.code in (401, 403) or 10000 in codes:
-                      fail(f"The deploy token cannot read Cloudflare Access applications (HTTP {e.code}). Add '{need}' to it under My Profile → API Tokens → Edit; the token value does not change. Refusing to deploy.")
+                      fail(f"The deploy token cannot read Cloudflare Access applications (HTTP {e.code}). Find the deploy token under My Profile → API Tokens if it is a user token, or Manage Account → Account API Tokens if it is an account token; Edit it, add '{need}', and save. The token value and the GitHub secret do not change. Refusing to deploy.")
                   fail(f"Cloudflare answered HTTP {e.code} for {path}: {json.dumps(body.get('errors'))[:400]}")
               except (urllib.error.URLError, TimeoutError) as e:
                   fail(f"The Cloudflare API did not answer ({e}), so the Access login cannot be confirmed")
@@ -158,21 +170,25 @@ jobs:
                   fail(f"Cloudflare refused {path}: {json.dumps(body.get('errors'))[:400]}")
               return body
 
-          def covers(uri):
+          def specificity(uri):
               uri = uri.split("://", 1)[-1].lower()
-              if uri == target or uri == "akshayprabhakant.com":
-                  return True
-              return uri.endswith("/*") and target.startswith(uri[:-1])
+              if uri == target:
+                  return (2, len(uri))
+              if uri.endswith("/*") and target.startswith(uri[:-1]):
+                  return (1, len(uri) - 2)
+              if uri == host:
+                  return (1, len(host))
+              return None
 
-          def allows(app):
+          def decisions(app):
+              found = set()
               for p in app.get("policies") or []:
                   if isinstance(p, str):
                       p = {"id": p}
                   if "decision" not in p and p.get("id"):
                       p = get(f"/accounts/{account}/access/policies/{p['id']}")["result"]
-                  if p.get("decision") == "allow":
-                      return True
-              return False
+                  found.add(p.get("decision"))
+              return found
 
           apps, page = [], 1
           while True:
@@ -184,22 +200,28 @@ jobs:
                   break
               page += 1
 
-          covering = []
+          ranked = []
           for app in apps:
               if app.get("type") != "self_hosted":
                   continue
               uris = [d.get("uri", "") for d in app.get("destinations") or [] if d.get("type", "public") == "public"]
               uris += [app.get("domain") or ""] + list(app.get("self_hosted_domains") or [])
-              if any(covers(u) for u in uris if u):
-                  covering.append(app)
+              ranks = [r for r in (specificity(u) for u in uris if u) if r]
+              if ranks:
+                  ranked.append((max(ranks), app))
 
-          if not covering:
+          if not ranked:
               fail(f"No self-hosted Cloudflare Access application covers {target}, so it would be on the open internet. Refusing to deploy.")
-          for app in covering:
-              if allows(app):
-                  print(f"{target} is covered by the Access application '{app.get('name')}' with an allow policy")
-                  sys.exit(0)
-          fail(f"{target} is covered by the Access application(s) {', '.join(repr(a.get('name')) for a in covering)}, but none has an allow policy. Refusing to deploy.")
+          top = max(rank for rank, _ in ranked)
+          for rank, app in ranked:
+              if rank != top:
+                  continue
+              found = decisions(app)
+              if "bypass" in found:
+                  fail(f"{target} is served by the Access application '{app.get('name')}', which has a Bypass policy, so anyone can reach it. Refusing to deploy.")
+              if "allow" not in found:
+                  fail(f"{target} is served by the Access application '{app.get('name')}', which has no Allow policy. Refusing to deploy.")
+          print(f"{target} is served by the Access application(s) {', '.join(repr(app.get('name')) for rank, app in ranked if rank == top)} with an Allow policy and no Bypass policy")
           PY
 
       - uses: actions/checkout@v6
@@ -332,7 +354,18 @@ jobs:
       # A self-hosted app lists what it covers in `destinations` (type public,
       # `uri`), or in the deprecated `domain` / `self_hosted_domains`; each of its
       # `policies` carries a `decision`, and one given by id alone is a reusable
-      # policy fetched on its own. One step on purpose: a later change can swap
+      # policy fetched on its own.
+      #
+      # Only the most specific covering app counts: "When multiple rules are set
+      # for a common root path, the more specific rule takes precedence."
+      #   https://developers.cloudflare.com/cloudflare-one/access-controls/policies/app-paths/
+      # So an exact destination beats a wildcard, a longer wildcard prefix beats
+      # a shorter one, and the bare domain ranks with `akshayprabhakant.com/*`;
+      # a tie judges every app in it. That app must have an Allow policy and no
+      # Bypass policy, because Bypass is evaluated before Allow and lets
+      # everyone through.
+      #   https://developers.cloudflare.com/cloudflare-one/access-controls/policies/
+      # One step on purpose: a later change can swap
       # it for `npx -y @akshaydev17/portfolio-app@<version> verify --path
       # /api/desk/whoami` in one line.
       - name: Check the path is behind Cloudflare Access
@@ -344,10 +377,11 @@ jobs:
           python3 - <<'PY'
           import json, os, sys, urllib.error, urllib.request
 
-          api = os.environ.get("CF_API_BASE", "https://api.cloudflare.com/client/v4")
+          api = "https://api.cloudflare.com/client/v4"
           account = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "")
           token = os.environ.get("CLOUDFLARE_API_TOKEN", "")
-          target = "akshayprabhakant.com" + os.environ["ACCESS_PATH"]
+          host = "akshayprabhakant.com"
+          target = host + os.environ["ACCESS_PATH"]
           need = "Account · Access: Apps and Policies · Read"
 
           def fail(msg):
@@ -369,7 +403,7 @@ jobs:
                       body = {"errors": [{"message": f"HTTP {e.code}"}]}
                   codes = {err.get("code") for err in body.get("errors") or []}
                   if e.code in (401, 403) or 10000 in codes:
-                      fail(f"The deploy token cannot read Cloudflare Access applications (HTTP {e.code}). Add '{need}' to it under My Profile → API Tokens → Edit; the token value does not change. Refusing to deploy.")
+                      fail(f"The deploy token cannot read Cloudflare Access applications (HTTP {e.code}). Find the deploy token under My Profile → API Tokens if it is a user token, or Manage Account → Account API Tokens if it is an account token; Edit it, add '{need}', and save. The token value and the GitHub secret do not change. Refusing to deploy.")
                   fail(f"Cloudflare answered HTTP {e.code} for {path}: {json.dumps(body.get('errors'))[:400]}")
               except (urllib.error.URLError, TimeoutError) as e:
                   fail(f"The Cloudflare API did not answer ({e}), so the Access login cannot be confirmed")
@@ -377,21 +411,25 @@ jobs:
                   fail(f"Cloudflare refused {path}: {json.dumps(body.get('errors'))[:400]}")
               return body
 
-          def covers(uri):
+          def specificity(uri):
               uri = uri.split("://", 1)[-1].lower()
-              if uri == target or uri == "akshayprabhakant.com":
-                  return True
-              return uri.endswith("/*") and target.startswith(uri[:-1])
+              if uri == target:
+                  return (2, len(uri))
+              if uri.endswith("/*") and target.startswith(uri[:-1]):
+                  return (1, len(uri) - 2)
+              if uri == host:
+                  return (1, len(host))
+              return None
 
-          def allows(app):
+          def decisions(app):
+              found = set()
               for p in app.get("policies") or []:
                   if isinstance(p, str):
                       p = {"id": p}
                   if "decision" not in p and p.get("id"):
                       p = get(f"/accounts/{account}/access/policies/{p['id']}")["result"]
-                  if p.get("decision") == "allow":
-                      return True
-              return False
+                  found.add(p.get("decision"))
+              return found
 
           apps, page = [], 1
           while True:
@@ -403,22 +441,28 @@ jobs:
                   break
               page += 1
 
-          covering = []
+          ranked = []
           for app in apps:
               if app.get("type") != "self_hosted":
                   continue
               uris = [d.get("uri", "") for d in app.get("destinations") or [] if d.get("type", "public") == "public"]
               uris += [app.get("domain") or ""] + list(app.get("self_hosted_domains") or [])
-              if any(covers(u) for u in uris if u):
-                  covering.append(app)
+              ranks = [r for r in (specificity(u) for u in uris if u) if r]
+              if ranks:
+                  ranked.append((max(ranks), app))
 
-          if not covering:
+          if not ranked:
               fail(f"No self-hosted Cloudflare Access application covers {target}, so it would be on the open internet. Refusing to deploy.")
-          for app in covering:
-              if allows(app):
-                  print(f"{target} is covered by the Access application '{app.get('name')}' with an allow policy")
-                  sys.exit(0)
-          fail(f"{target} is covered by the Access application(s) {', '.join(repr(a.get('name')) for a in covering)}, but none has an allow policy. Refusing to deploy.")
+          top = max(rank for rank, _ in ranked)
+          for rank, app in ranked:
+              if rank != top:
+                  continue
+              found = decisions(app)
+              if "bypass" in found:
+                  fail(f"{target} is served by the Access application '{app.get('name')}', which has a Bypass policy, so anyone can reach it. Refusing to deploy.")
+              if "allow" not in found:
+                  fail(f"{target} is served by the Access application '{app.get('name')}', which has no Allow policy. Refusing to deploy.")
+          print(f"{target} is served by the Access application(s) {', '.join(repr(app.get('name')) for rank, app in ranked if rank == top)} with an Allow policy and no Bypass policy")
           PY
 
       - uses: actions/checkout@v6

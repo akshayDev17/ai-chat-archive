@@ -340,11 +340,13 @@ Two secrets, from **Account API tokens → Create Token → Edit Cloudflare Work
 > — <https://developers.cloudflare.com/fundamentals/api/reference/template/>
 
 > **Add `Access: Apps and Policies Read` too.** Both deploy jobs first ask the
-> Cloudflare API whether a self-hosted Access application with an allow policy
-> still covers `/api/desk/whoami`, and refuse to deploy otherwise. Add it to the
-> existing token: My Profile → API Tokens → Edit on the deploy token → Add more
-> → Account · Access: Apps and Policies · Read → Continue to summary → Update
-> token. The token value, and so the GitHub secret, do not change.
+> Cloudflare API which self-hosted Access application most specifically covers
+> `/api/desk/whoami`, and refuse to deploy unless it has an Allow policy and no
+> Bypass policy. Add the permission to the existing token: find the deploy token
+> under My Profile → API Tokens if it is a user token, or Manage Account →
+> Account API Tokens if it is an account token; Edit it, add Account · Access:
+> Apps and Policies · Read, and save. The token value and the GitHub secret do
+> not change.
 > — <https://developers.cloudflare.com/fundamentals/api/reference/permissions/>
 
 The docs on storing it: "Don't store the value of `CLOUDFLARE_API_TOKEN` in your
@@ -357,9 +359,9 @@ repository, as it gives access to deploy Workers on your account."
   scripts and once through pytest, then `npm ci`, `npm run test:lib`,
   `tsc --noEmit` and `npm run build:check`.
 - **`deploy-api`** — `main` only, after `test` passes: a check, through
-  the Cloudflare API, that a self-hosted Access application with an allow
-  policy still covers `/api/desk/whoami` (no coverage, no deploy), a secrets
-  check, a D1
+  the Cloudflare API, that the most specific self-hosted Access application
+  covering `/api/desk/whoami` has an Allow policy and no Bypass policy (no
+  such app, no deploy), a secrets check, a D1
   permission check, an R2 bucket check, `d1 migrations apply --remote`,
   `pywrangler deploy`, then a health check against the deployed Worker.
 
