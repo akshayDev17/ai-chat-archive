@@ -15,6 +15,7 @@ Run:  python3 backend/test/test_access_gate.py
 from __future__ import annotations
 
 import contextlib
+import http.client
 import io
 import json
 import os
@@ -55,11 +56,12 @@ def fake_cloudflare(apps: list[dict], policies: dict[str, dict] | None = None):
     return urlopen
 
 
-def run_check(script: str, urlopen) -> tuple[int, str]:
+def run_check(script: str, urlopen, **secrets: str) -> tuple[int, str]:
     env = {
         "ACCESS_PATH": "/api/desk/whoami",
         "CLOUDFLARE_API_TOKEN": "token",
         "CLOUDFLARE_ACCOUNT_ID": "account",
+        **secrets,
     }
     out = io.StringIO()
     code = 0
@@ -86,11 +88,11 @@ class TestAccessGate(unittest.TestCase):
         self.scripts = access_check_scripts()
         self.assertEqual(len(self.scripts), 2)
 
-    def verdicts(self, urlopen) -> list[tuple[int, str]]:
-        return [run_check(s, urlopen) for s in self.scripts]
+    def verdicts(self, urlopen, **secrets: str) -> list[tuple[int, str]]:
+        return [run_check(s, urlopen, **secrets) for s in self.scripts]
 
-    def assert_passes(self, urlopen):
-        for code, out in self.verdicts(urlopen):
+    def assert_passes(self, urlopen, **secrets: str):
+        for code, out in self.verdicts(urlopen, **secrets):
             self.assertEqual(code, 0, out)
 
     def assert_refuses(self, urlopen) -> list[str]:
@@ -194,6 +196,22 @@ class TestAccessGate(unittest.TestCase):
         for out in self.assert_refuses(urlopen):
             self.assertIn("My Profile → API Tokens", out)
             self.assertIn("Manage Account → Account API Tokens", out)
+
+    def test_secrets_ending_in_a_newline_reach_the_api_cleanly(self):
+        # A GitHub secret pasted with a trailing newline once made http.client
+        # refuse the request: "Invalid header value b'***'".
+        answer = fake_cloudflare([app("desk", f"{HOST}/api/desk/*", "allow")])
+
+        def urlopen(req, timeout=None):
+            conn = http.client.HTTPConnection("api.cloudflare.com")
+            conn.putrequest("GET", req.selector)
+            for name, value in req.header_items():
+                conn.putheader(name, value)
+            self.assertEqual(req.get_header("Authorization"), "Bearer token")
+            self.assertIn("/accounts/account/", req.full_url)
+            return answer(req, timeout)
+
+        self.assert_passes(urlopen, CLOUDFLARE_API_TOKEN="token\n", CLOUDFLARE_ACCOUNT_ID="account\n")
 
 
 if __name__ == "__main__":

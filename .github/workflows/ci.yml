@@ -154,8 +154,8 @@ jobs:
           import json, os, re, sys, urllib.error, urllib.request
 
           api = "https://api.cloudflare.com/client/v4"
-          account = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "")
-          token = os.environ.get("CLOUDFLARE_API_TOKEN", "")
+          account = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "").strip()
+          token = os.environ.get("CLOUDFLARE_API_TOKEN", "").strip()
           host = "akshayprabhakant.com"
           target = host + os.environ["ACCESS_PATH"]
           need = "Account · Access: Apps and Policies · Read"
@@ -420,8 +420,8 @@ jobs:
           import json, os, re, sys, urllib.error, urllib.request
 
           api = "https://api.cloudflare.com/client/v4"
-          account = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "")
-          token = os.environ.get("CLOUDFLARE_API_TOKEN", "")
+          account = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "").strip()
+          token = os.environ.get("CLOUDFLARE_API_TOKEN", "").strip()
           host = "akshayprabhakant.com"
           target = host + os.environ["ACCESS_PATH"]
           need = "Account · Access: Apps and Policies · Read"
