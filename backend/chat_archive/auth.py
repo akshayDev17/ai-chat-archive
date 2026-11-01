@@ -21,10 +21,13 @@ of this ABC. Nothing else in the backend changes — that is the point.
 
 from __future__ import annotations
 
+import json
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from typing import Callable
 
 from .models import normalize_email
+from .urls import path_of
 
 
 @dataclass(frozen=True)
@@ -102,18 +105,64 @@ class CloudflareAccessIdentity(IdentityProvider):
     route answers 401. That is the correct failure direction, but it is also why
     :meth:`IdentityProvider.identify` failing closed is not by itself enough —
     something has to *tell you* it failed closed.
+
+    **It does fail, intermittently, for signed-in readers.** A live test saw
+    about one ``/api/desk/*`` call in six answer 401 while siblings in the same
+    page load, with the same cookies, answered 200. In workerd, ``ctx.access``
+    is built from the current request's Access info and ``getIdentity()`` is an
+    RPC to Cloudflare's identity service that "resolves to ``undefined`` when no
+    identity is associated with the request"; an uncaught throw here would have
+    been a 500, not a 401. So a 401 means ``ctx.access`` was absent or the
+    lookup came back without an email, and which of the two is only visible in
+    production. Hence:
+
+    1. ``getIdentity()`` gets a second try when it throws or has no email.
+    2. Every 401 this produces logs one line naming the branch that fired, and
+       every rescue by the retry logs what the first try hit, so the cause can
+       be read off the Worker's logs. The lines carry the request path, branch
+       names and error class/message, never a token, cookie, header value or
+       email.
     """
 
-    def __init__(self, ctx):
+    def __init__(self, ctx, log: Callable[[str], None] = print):
         self._ctx = ctx
+        self._log = log
 
     async def identify(self, request) -> Identity | None:
+        email, attempts = await self._email_from_access()
+        if not attempts:
+            return Identity(email)
+
+        record = {
+            "event": "desk_identity_recovered" if email else "desk_identity_missing",
+            "path": path_of(str(request.url)),
+            "branch": attempts[0]["branch"],
+            "attempts": attempts,
+        }
+        self._log(json.dumps(record))
+        return Identity(email) if email else None
+
+    async def _email_from_access(self) -> tuple[str | None, list[dict]]:
+        """The email from ``ctx.access``, and each failed attempt before it."""
         access = getattr(self._ctx, "access", None)
         if access is None:
-            return None
+            return None, [{"branch": "access_absent"}]
 
-        identity = await access.getIdentity()
-        email = getattr(identity, "email", None)
-        if not email:
-            return None
-        return Identity(email)
+        failures = []
+        for _ in range(2):
+            try:
+                identity = await access.getIdentity()
+            except Exception as exc:
+                failures.append(
+                    {
+                        "branch": "get_identity_threw",
+                        "error_class": type(exc).__name__,
+                        "error": str(exc)[:200],
+                    }
+                )
+                continue
+            email = getattr(identity, "email", None)
+            if email:
+                return str(email), failures
+            failures.append({"branch": "resolved_without_email"})
+        return None, failures
