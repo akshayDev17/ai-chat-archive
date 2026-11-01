@@ -33,10 +33,12 @@ Two things this file has to get right:
 from __future__ import annotations
 
 import json
+import time
 from datetime import datetime, timezone
 
 from workers import Response, WorkerEntrypoint
 
+from .access_jwt import AccessJwtFallback
 from .auth import CloudflareAccessIdentity
 from .chatgpt.decoder import ChatGptFlightDecoder
 from .chatgpt.parser import ChatGptParser
@@ -110,7 +112,28 @@ class Default(WorkerEntrypoint):
         await self._copy_media()
 
     def _identity_provider(self) -> CloudflareAccessIdentity:
-        return CloudflareAccessIdentity(getattr(self, "ctx", None))
+        return CloudflareAccessIdentity(getattr(self, "ctx", None), self._jwt_fallback())
+
+    def _jwt_fallback(self) -> AccessJwtFallback | None:
+        """Verify Access's signed token when ``ctx.access`` comes back empty.
+
+        Off unless both vars are set: without the team domain there are no keys
+        to verify against, and without the audience any app's token would pass.
+        """
+        env = getattr(self, "env", None)
+        team_domain = getattr(env, "ACCESS_TEAM_DOMAIN", "") or ""
+        audience = getattr(env, "ACCESS_AUD", "") or ""
+        if not (team_domain and audience):
+            return None
+        worker_fetch = make_worker_fetch()
+
+        async def fetch_json(url: str) -> dict:
+            response = await worker_fetch(url)
+            if not response.ok:
+                raise RuntimeError(f"HTTP {response.status}")
+            return json.loads(await response.text())
+
+        return AccessJwtFallback(str(team_domain), str(audience), fetch_json, time.time)
 
     # ------------------------------------------------------------------ routes
 

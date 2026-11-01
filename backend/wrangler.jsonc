@@ -45,8 +45,18 @@
   // The off-Cloudflare proxy (Deno Deploy) that reaches chatgpt.com for us.
   // The token is a wrangler secret (FETCH_TOKEN), NOT committed here, so it is
   // never exposed in the repo.
+  //
+  // ACCESS_TEAM_DOMAIN and ACCESS_AUD let the Worker verify the signed
+  // Cf-Access-Jwt-Assertion token when ctx.access.getIdentity() comes back
+  // empty for a signed-in reader (see chat_archive/access_jwt.py). Both are
+  // public: they appear in the redirect Access sends any anonymous visitor to
+  // /api/desk/whoami (the team host, and the app's AUD tag as `kid=`). Confirm
+  // the AUD tag under Zero Trust → Access → Applications → the desk app →
+  // Overview. Remove either var to switch the fallback off.
   "vars": {
-    "PROXY_BASE_URL": "https://ai-chat-archive.akshaydev17.deno.net"
+    "PROXY_BASE_URL": "https://ai-chat-archive.akshaydev17.deno.net",
+    "ACCESS_TEAM_DOMAIN": "shiny-moon-6b37.cloudflareaccess.com",
+    "ACCESS_AUD": "51046a87e270ef07eb786d3cd7aa713e489eadc1043e7946de9fa6bb0bd9efdf"
   },
 
   // Lets `wrangler dev` simulate an authenticated Access identity, so

@@ -34,8 +34,28 @@ export function isSignInRequired(error: unknown): boolean {
   return error instanceof ApiError && error.status === 401;
 }
 
+/** How long to wait before asking a second time after a 401. */
+export const SIGN_IN_RETRY_DELAY_MS = 250;
+
+/**
+ * One request, asked twice if the first answer is a 401.
+ *
+ * A signed-in reader's `/api/desk/*` calls intermittently 401 while their
+ * siblings, carrying the same cookies, succeed: the Worker's identity lookup
+ * sometimes comes back empty. One stray 401 must not flip the masthead to
+ * "Sign in", so a 401 is asked again once, after a short pause, before it is
+ * believed. A retried POST or DELETE is safe: the Worker checks identity
+ * before doing anything, so a 401 means nothing was done.
+ */
+async function fetchRetryingSignIn(url: string, init: RequestInit): Promise<Response> {
+  const res = await fetch(url, init);
+  if (res.status !== 401) return res;
+  await new Promise((resolve) => setTimeout(resolve, SIGN_IN_RETRY_DELAY_MS));
+  return fetch(url, init);
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await fetchRetryingSignIn(`${API_BASE}${path}`, {
     // Send the auth cookie once the Worker sets one; harmless before that.
     credentials: 'include',
     ...init,
