@@ -26,7 +26,6 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Callable
 
-from .access_jwt import AccessJwtFallback, InvalidAccessJwt
 from .models import normalize_email
 from .urls import path_of
 
@@ -115,36 +114,23 @@ class CloudflareAccessIdentity(IdentityProvider):
     identity is associated with the request"; an uncaught throw here would have
     been a 500, not a 401. So a 401 means ``ctx.access`` was absent or the
     lookup came back without an email, and which of the two is only visible in
-    production. Hence, in order:
+    production. Hence:
 
     1. ``getIdentity()`` gets a second try when it throws or has no email.
-    2. If that still yields nothing, the signed ``Cf-Access-Jwt-Assertion``
-       token Access attached is verified (see ``access_jwt.py``) and its email
-       used. Never the bare header: only a token whose signature, audience and
-       issuer check out.
-    3. Every 401 this produces logs one line naming the branch that fired, and
-       every rescue logs which step rescued it, so the cause can be read off the
-       Worker's logs. The lines carry the request path, branch names and error
-       class/message, never a token, cookie, header value or email.
+    2. Every 401 this produces logs one line naming the branch that fired, and
+       every rescue by the retry logs what the first try hit, so the cause can
+       be read off the Worker's logs. The lines carry the request path, branch
+       names and error class/message, never a token, cookie, header value or
+       email.
     """
 
-    def __init__(
-        self,
-        ctx,
-        jwt_fallback: AccessJwtFallback | None = None,
-        log: Callable[[str], None] = print,
-    ):
+    def __init__(self, ctx, log: Callable[[str], None] = print):
         self._ctx = ctx
-        self._jwt_fallback = jwt_fallback
         self._log = log
 
     async def identify(self, request) -> Identity | None:
         email, attempts = await self._email_from_access()
-        fallback = None
-        if not email:
-            email, fallback = await self._email_from_assertion(request)
-
-        if email and not attempts:
+        if not attempts:
             return Identity(email)
 
         record = {
@@ -153,8 +139,6 @@ class CloudflareAccessIdentity(IdentityProvider):
             "branch": attempts[0]["branch"],
             "attempts": attempts,
         }
-        if fallback is not None:
-            record["jwt_fallback"] = fallback
         self._log(json.dumps(record))
         return Identity(email) if email else None
 
@@ -182,15 +166,3 @@ class CloudflareAccessIdentity(IdentityProvider):
                 return str(email), failures
             failures.append({"branch": "resolved_without_email"})
         return None, failures
-
-    async def _email_from_assertion(self, request) -> tuple[str | None, str]:
-        """The email from Access's signed token, and what the attempt came to."""
-        if self._jwt_fallback is None:
-            return None, "not_configured"
-        token = request.headers.get("cf-access-jwt-assertion")
-        if not token:
-            return None, "no_assertion"
-        try:
-            return await self._jwt_fallback.email_from(str(token)), "verified"
-        except InvalidAccessJwt as exc:
-            return None, exc.reason
