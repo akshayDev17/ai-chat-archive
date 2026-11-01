@@ -339,6 +339,18 @@ Two secrets, from **Account API tokens → Create Token → Edit Cloudflare Work
 > cannot run.
 > — <https://developers.cloudflare.com/fundamentals/api/reference/template/>
 
+> **Add `Access: Apps and Policies Read` too.** Both deploy jobs first ask the
+> Cloudflare API which self-hosted Access application most specifically covers
+> `/api/desk/whoami`, and refuse to deploy unless it has an Allow policy and no
+> Bypass policy. That proves `/api/desk/whoami` is served under such an
+> application, not that every `/api/desk/` path is. Add the permission to the
+> existing token: find the deploy token
+> under My Profile → API Tokens if it is a user token, or Manage Account →
+> Account API Tokens if it is an account token; Edit it, add Account · Access:
+> Apps and Policies · Read, and save. The token value and the GitHub secret do
+> not change.
+> — <https://developers.cloudflare.com/fundamentals/api/reference/permissions/>
+
 The docs on storing it: "Don't store the value of `CLOUDFLARE_API_TOKEN` in your
 repository, as it gives access to deploy Workers on your account."
 — <https://developers.cloudflare.com/workers/ci-cd/external-cicd/github-actions/>
@@ -348,9 +360,10 @@ repository, as it gives access to deploy Workers on your account."
 - **`test`** — runs on every push and pull request. Backend tests twice, once as
   scripts and once through pytest, then `npm ci`, `npm run test:lib`,
   `tsc --noEmit` and `npm run build:check`.
-- **`deploy-api`** — `main` only, after `test` passes: a check that an
-  anonymous request to `/api/desk/whoami` still redirects to the
-  `cloudflareaccess.com` login (no redirect, no deploy), a secrets check, a D1
+- **`deploy-api`** — `main` only, after `test` passes: a check, through
+  the Cloudflare API, that the most specific self-hosted Access application
+  covering `/api/desk/whoami` has an Allow policy and no Bypass policy (no
+  such app, no deploy), a secrets check, a D1
   permission check, an R2 bucket check, `d1 migrations apply --remote`,
   `pywrangler deploy`, then a health check against the deployed Worker.
 
@@ -359,7 +372,7 @@ workflow sets `ARCHIVE_LIVE_TESTS=0` so it skips itself. A build that goes red
 because ChatGPT rate-limited us, or decided runner traffic looked like a bot,
 says nothing about the change under test.
 
-A **`deploy-frontend`** job is built: the same Access login check →
+A **`deploy-frontend`** job is built: the same Access check →
 `npm ci` → static-export build
 (`NEXT_PUBLIC_API_BASE='' npm run build`) → `npx wrangler deploy` (the frontend
 Worker) → verify `/chat-archives` and a story URL both answer 200.
