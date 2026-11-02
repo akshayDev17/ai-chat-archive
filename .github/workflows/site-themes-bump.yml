@@ -1,0 +1,111 @@
+name: site-themes bump
+
+# Opens a PR bumping the pinned site-themes tag when a newer release lands.
+#
+# site-themes is a build-time package installed straight from GitHub
+# (`github:akshayDev17/site-themes#vX.Y.Z` in frontend/package.json), and a
+# release is a git tag. A new theme reaches this app only through a rebuild, so
+# this checks the package's tags once a day and, when one is newer than the pin,
+# opens a PR with the bump already built and tested.
+#
+# Opening the PR needs the repository setting "Allow GitHub Actions to create
+# and approve pull requests" (Settings → Actions → General). Without it the job
+# still pushes the tested site-themes/bump-<tag> branch, then fails with a
+# compare link so the PR can be opened by hand.
+#
+# A PR opened with GITHUB_TOKEN does not start the CI workflow, so this job runs
+# the same frontend checks before it opens one. To run CI on the bump PR itself,
+# close and reopen it.
+
+on:
+  schedule:
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: site-themes-bump
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    name: Bump site-themes
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PACKAGE_REPO: akshayDev17/site-themes
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Compare the pinned tag with the newest release tag
+        id: tags
+        working-directory: frontend
+        run: |
+          pinned=$(node -p "require('./package.json').dependencies['site-themes'].split('#')[1]")
+          latest=$(gh api "repos/$PACKAGE_REPO/tags" --paginate --jq '.[].name' \
+            | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1)
+          echo "pinned=$pinned latest=$latest"
+          if [ -z "$latest" ] || [ "$latest" = "$pinned" ] \
+            || [ "$(printf '%s\n%s\n' "$pinned" "$latest" | sort -V | tail -n 1)" != "$latest" ]; then
+            echo "Pinned tag is current."
+            exit 0
+          fi
+          branch="site-themes/bump-$latest"
+          if git ls-remote --exit-code --heads origin "$branch" >/dev/null; then
+            echo "Branch $branch already exists; its PR is open or was closed on purpose."
+            exit 0
+          fi
+          {
+            echo "latest=$latest"
+            echo "pinned=$pinned"
+            echo "branch=$branch"
+          } >> "$GITHUB_OUTPUT"
+
+      - if: steps.tags.outputs.latest
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install the new tag
+        if: steps.tags.outputs.latest
+        working-directory: frontend
+        run: |
+          npm ci
+          npm install "github:$PACKAGE_REPO#${{ steps.tags.outputs.latest }}"
+
+      - name: Check the build with the new tag
+        if: steps.tags.outputs.latest
+        working-directory: frontend
+        run: |
+          npm run test:lib
+          npx tsc --noEmit
+          npm run build:check
+
+      - name: Open the bump PR
+        if: steps.tags.outputs.latest
+        env:
+          LATEST: ${{ steps.tags.outputs.latest }}
+          PINNED: ${{ steps.tags.outputs.pinned }}
+          BRANCH: ${{ steps.tags.outputs.branch }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git switch -c "$BRANCH"
+          git add frontend/package.json frontend/package-lock.json
+          git commit -m "build: bump site-themes from $PINNED to $LATEST"
+          git push origin "$BRANCH"
+          base="${{ github.event.repository.default_branch }}"
+          if ! gh pr create --base "$base" --head "$BRANCH" \
+            --title "build: bump site-themes from $PINNED to $LATEST" \
+            --body "Bumps the pinned build-time theme package to [$LATEST](https://github.com/$PACKAGE_REPO/releases/tag/$LATEST) (was $PINNED).
+
+          This job already ran the library tests, the typecheck and the production build with the new tag. A PR opened by GITHUB_TOKEN does not start CI, so close and reopen this PR to run it here. New themes reach the site only after this merges and the app redeploys."; then
+            compare="${{ github.server_url }}/${{ github.repository }}/compare/$base...$BRANCH?expand=1"
+            echo "::error::Could not open the PR (is \"Allow GitHub Actions to create and approve pull requests\" off?). The tested branch $BRANCH is pushed; open it here: $compare"
+            exit 1
+          fi
