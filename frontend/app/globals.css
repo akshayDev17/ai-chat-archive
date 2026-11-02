@@ -976,9 +976,10 @@ body {
      sticker of itself: brand marks are drawn to sit on light ground, and
      inverting one costs it the interior detail that makes it recognisable.
      A hairline keeps the white disc from reading as a hole punched in the
-     paper, which is what it does without one. */
-  background: var(--card);
-  color: var(--ink);
+     paper, which is what it does without one.
+     These are fixed identity colours, outside the theme, like the data tints. */
+  background: #FFFFFF;
+  color: #0F1220;
   border: 1px solid var(--rule);
   display: grid;
   place-items: center;
@@ -1403,18 +1404,23 @@ body {
   margin-top: 2px;
 }
 
-/* A vendor's own mark. The element is a *mask*, so `background-color` is the
-   fill of the logo shape itself, not a tile behind it — there is no black
-   background here to remove, and the ink fill already sits on the card. A border
-   would be masked away with everything else outside the logo. */
+/* A vendor's own mark: the logo in Classic ink on a white tile, for the same
+   reason as `.mark` — brand marks are drawn for light ground and lose their
+   detail when inverted. These are fixed identity colours, outside the theme.
+   The logo is a mask on the pseudo-element, so the tile itself is not masked
+   away with everything outside the logo shape. */
 .src-icon-vendor {
-  background-color: var(--ink);
-  mask-repeat: no-repeat;
-  mask-position: center;
-  mask-size: contain;
-  -webkit-mask-repeat: no-repeat;
-  -webkit-mask-position: center;
-  -webkit-mask-size: contain;
+  position: relative;
+  background: #FFFFFF;
+}
+
+.src-icon-vendor::before {
+  content: '';
+  position: absolute;
+  inset: 15%;
+  background-color: #0F1220;
+  mask: var(--mark) center / contain no-repeat;
+  -webkit-mask: var(--mark) center / contain no-repeat;
 }
 
 /* A site with no mark of its own: its initial on a tint fixed by the domain, so

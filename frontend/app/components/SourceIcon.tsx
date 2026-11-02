@@ -1,3 +1,4 @@
+import type { CSSProperties } from 'react';
 import { domainOf, domainTint, vendorForUrl, vendorMark } from '@/lib/vendors';
 
 /**
@@ -5,9 +6,9 @@ import { domainOf, domainTint, vendorForUrl, vendorMark } from '@/lib/vendors';
  *
  * Three cases, in order:
  *
- *  1. **A vendor we have a mark for** — ChatGPT, Gemini, Claude — rendered as a
- *     CSS `mask` so the single-path SVG takes `currentColor`. One file serves
- *     the paper, the ink and the accent without three variants.
+ *  1. **A vendor we have a mark for** — ChatGPT, Gemini, Claude — the
+ *     single-path SVG used as a CSS `mask`, filled in fixed ink on a fixed
+ *     white tile so the brand mark never inverts under a dark theme.
  *  2. **A vendor without a mark yet** (Elicit) and **any other site** — a
  *     monogram: the domain's first letter on a tint picked from the domain, so
  *     a given site always looks the same and the list does not read as random.
@@ -27,12 +28,7 @@ export default function SourceIcon({ url, size = 24 }: { url: string; size?: num
     return (
       <span
         className="src-icon src-icon-vendor"
-        style={{
-          width: size,
-          height: size,
-          maskImage: `url(${mark})`,
-          WebkitMaskImage: `url(${mark})`,
-        }}
+        style={{ width: size, height: size, '--mark': `url(${mark})` } as CSSProperties}
         role="img"
         aria-label={vendor ?? undefined}
       />
