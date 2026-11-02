@@ -107,7 +107,7 @@ jobs:
           git add frontend/package.json frontend/package-lock.json
           git commit -m "build: bump site-themes from $PINNED to $LATEST"
           git push origin "$BRANCH"
-          base="${{ github.event.repository.default_branch }}"
+          base=$(gh api "repos/$GITHUB_REPOSITORY" --jq .default_branch)
           if ! gh pr create --base "$base" --head "$BRANCH" \
             --title "build: bump site-themes from $PINNED to $LATEST" \
             --body "Bumps the pinned build-time theme package to [$LATEST](https://github.com/$PACKAGE_REPO/releases/tag/$LATEST) (was $PINNED).

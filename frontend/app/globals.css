@@ -1270,7 +1270,7 @@ body {
   flex-direction: column;
   background: var(--card);
   border-left: 1px solid var(--card-line);
-  box-shadow: -18px 0 40px -28px var(--ink);
+  box-shadow: -18px 0 40px -28px #0F1220;
 }
 
 .src-head {
@@ -1394,8 +1394,10 @@ body {
 }
 
 /* ── source and vendor marks ───────────────────────── */
-/* Rendered as a mask so one single-path SVG takes currentColor: the same file
-   works on paper, on ink and on the accent. */
+/* Vendor logos are single-path SVGs used as masks. In the source list the logo
+   is filled in ink on a transparent badge, with a fixed white backing only under
+   dark-scheme themes; `.bot-mark` fills with currentColor and so inherits the
+   fixed ink from `.mark`. */
 .src-icon {
   flex: none;
   display: block;
@@ -1412,16 +1414,21 @@ body {
    the logo shape. */
 .src-icon-vendor {
   position: relative;
-  background: light-dark(transparent, #FFFFFF);
+  background: transparent;
 }
 
 .src-icon-vendor::before {
   content: '';
   position: absolute;
   inset: 0;
-  background-color: light-dark(var(--ink), #0F1220);
+  background-color: var(--ink);
   mask: var(--mark) center / contain no-repeat;
   -webkit-mask: var(--mark) center / contain no-repeat;
+}
+
+@supports (color: light-dark(#000, #fff)) {
+  .src-icon-vendor { background: light-dark(transparent, #FFFFFF); }
+  .src-icon-vendor::before { background-color: light-dark(var(--ink), #0F1220); }
 }
 
 /* A site with no mark of its own: its initial on a tint fixed by the domain, so
