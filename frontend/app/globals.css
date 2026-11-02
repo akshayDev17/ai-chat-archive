@@ -1404,21 +1404,22 @@ body {
   margin-top: 2px;
 }
 
-/* A vendor's own mark: the logo in Classic ink on a white tile, for the same
-   reason as `.mark` — brand marks are drawn for light ground and lose their
-   detail when inverted. These are fixed identity colours, outside the theme.
-   The logo is a mask on the pseudo-element, so the tile itself is not masked
-   away with everything outside the logo shape. */
+/* A vendor's own mark, filled in ink. On a dark-scheme theme the ink turns light,
+   and a brand mark knocked out in light on dark loses its interior detail (see
+   `.mark`), so there the badge gets a white tile and the logo stays Classic ink.
+   These are fixed identity colours, outside the theme. The logo is a mask on the
+   pseudo-element, so the tile itself is not masked away with everything outside
+   the logo shape. */
 .src-icon-vendor {
   position: relative;
-  background: #FFFFFF;
+  background: light-dark(transparent, #FFFFFF);
 }
 
 .src-icon-vendor::before {
   content: '';
   position: absolute;
-  inset: 15%;
-  background-color: #0F1220;
+  inset: 0;
+  background-color: light-dark(var(--ink), #0F1220);
   mask: var(--mark) center / contain no-repeat;
   -webkit-mask: var(--mark) center / contain no-repeat;
 }
