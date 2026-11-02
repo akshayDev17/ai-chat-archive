@@ -16,6 +16,10 @@ name: site-themes bump
 # A PR opened with GITHUB_TOKEN does not start the CI workflow, so this job runs
 # the same frontend checks before it opens one. To run CI on the bump PR itself,
 # close and reopen it.
+#
+# GitHub disables a scheduled workflow after 60 days without repository
+# activity. Each run re-enables this workflow through the API, so a quiet repo
+# never silently stops checking for new themes.
 
 on:
   schedule:
@@ -23,6 +27,7 @@ on:
   workflow_dispatch:
 
 permissions:
+  actions: write
   contents: write
   pull-requests: write
 
@@ -38,6 +43,9 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       PACKAGE_REPO: akshayDev17/site-themes
     steps:
+      - name: Keep this scheduled workflow enabled
+        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/site-themes-bump.yml/enable"
+
       - uses: actions/checkout@v6
 
       - name: Compare the pinned tag with the newest release tag
