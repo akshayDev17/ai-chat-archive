@@ -175,16 +175,16 @@ fails for that implementation specifically.
 ```
 frontend/
 ├── app/
-│   ├── layout.tsx              # fonts + metadata
+│   ├── layout.tsx              # fonts, metadata, site-themes boot script
 │   ├── page.tsx                # NOT the archive — points at /chat-archives
-│   ├── globals.css             # the whole design system
+│   ├── globals.css             # the design system, on site-themes tokens
 │   ├── chat-archives/page.tsx        # the edition (public)
 │   ├── chat-archives/login/page.tsx  # sign in (own path)
 │   ├── chat-archives/desk/page.tsx   # the copy desk — file a share link
 │   ├── chat-archives/[id]/page.tsx   # the reader (?chat for the transcript)
 │   └── components/
-│       ├── Masthead.tsx        # the nameplate
-│       ├── MastheadActions.tsx # top-right slot: Sign in, or Copy desk
+│       ├── Masthead.tsx        # the nameplate + theme picker
+│       ├── MastheadActions.tsx # auth links: Sign in, or Copy desk
 │       ├── FrontPage.tsx       # leads + ragged columns
 │       ├── CopyDesk.tsx        # the filing form + your recent filings
 │       ├── StoryLink.tsx       # one story rendered as a link
