@@ -1,5 +1,8 @@
 import type { Metadata } from 'next';
 import { Newsreader, IBM_Plex_Mono } from 'next/font/google';
+import { bootScript } from 'site-themes';
+// The package's tokens first; globals.css aliases the app's names onto them.
+import 'site-themes/themes.css';
 import './globals.css';
 
 const newsreader = Newsreader({
@@ -22,7 +25,14 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${newsreader.variable} ${plexMono.variable}`}>
+    // suppressHydrationWarning: the boot script sets data-theme on <html> before
+    // React hydrates, so the server markup never carries it.
+    <html lang="en" className={`${newsreader.variable} ${plexMono.variable}`} suppressHydrationWarning>
+      <head>
+        {/* Inline, never a src: it picks the stored theme before first paint
+            with no request, so the first frame is already in the right theme. */}
+        <script dangerouslySetInnerHTML={{ __html: bootScript }} />
+      </head>
       <body>{children}</body>
     </html>
   );

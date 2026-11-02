@@ -1,3 +1,4 @@
+import { ThemePicker } from 'site-themes/react';
 import MastheadActions from './MastheadActions';
 
 function edition(): string {
@@ -12,9 +13,10 @@ function edition(): string {
 }
 
 /**
- * The paper's nameplate. `actions` decides what sits in the top-right corner:
- * the auth-aware slot on the front page, nothing on the sign-in screen — there
- * is no point offering "Sign in" to someone already on the sign-in page.
+ * The paper's nameplate. The top-right corner always holds the theme picker;
+ * `actions` adds the auth-aware links beside it on the front page, and nothing
+ * on the sign-in screen — there is no point offering "Sign in" to someone
+ * already on the sign-in page.
  */
 export default function Masthead({
   section,
@@ -30,7 +32,10 @@ export default function Masthead({
           <span className="name">The AI Digest</span>
           <span className="edition">{section ?? edition()}</span>
         </div>
-        {actions ? <MastheadActions /> : null}
+        <div className="mh-actions">
+          {actions ? <MastheadActions /> : null}
+          <ThemePicker hideLabel className="mh-theme" />
+        </div>
       </div>
       <div className="tagline">An AI conversation newspaper · the sessions, as stories</div>
     </header>

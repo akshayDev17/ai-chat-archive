@@ -6,8 +6,8 @@ import { signOut, whoami } from '@/lib/api';
 import { AFTER_SIGN_OUT } from '@/lib/nav';
 
 /**
- * The masthead's top-right slot — the only place auth is surfaced on the
- * public pages.
+ * The auth links in the masthead's top-right slot — the only place auth is
+ * surfaced on the public pages.
  *
  *   signed out → Sign in
  *   signed in  → Copy desk · Sign out
@@ -49,16 +49,17 @@ export default function MastheadActions() {
     };
   }, []);
 
-  // Reserve the slot while resolving so the masthead does not reflow.
-  if (signedIn === null) return <div className="mh-actions" aria-hidden="true" />;
+  // Nothing while resolving: the slot (with its stable floor) belongs to the
+  // masthead, so the nameplate does not reflow when the links arrive.
+  if (signedIn === null) return null;
 
   return (
-    <div className="mh-actions">
+    <>
       <Link href={signedIn ? '/chat-archives/desk' : '/chat-archives/login'} className="signin">
         {signedIn ? 'Copy desk' : 'Sign in'} <span aria-hidden="true">→</span>
       </Link>
       {signedIn ? <SignOut /> : null}
-    </div>
+    </>
   );
 }
 
