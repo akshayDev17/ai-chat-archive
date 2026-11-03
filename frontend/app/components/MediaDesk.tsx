@@ -1,8 +1,6 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import {
   copyMediaNow,
   isSignInRequired,
@@ -31,7 +29,6 @@ const POLL_MS = 10_000;
  * way `story.tsx` reads its mode, so the static export needs no dynamic route.
  */
 export default function MediaDesk() {
-  const router = useRouter();
   const [checking, setChecking] = useState(true);
   const [storyId] = useState<string | null>(() =>
     typeof window === 'undefined' ? null : new URLSearchParams(window.location.search).get('id'),
@@ -40,7 +37,7 @@ export default function MediaDesk() {
   useEffect(() => {
     let cancelled = false;
     const bounce = () =>
-      router.replace(`/chat-archives/login?next=${encodeURIComponent(HERE)}`);
+      window.location.replace(`/chat-archives/login?next=${encodeURIComponent(HERE)}`);
     whoami()
       .then((email) => {
         if (cancelled) return;
@@ -53,7 +50,7 @@ export default function MediaDesk() {
     return () => {
       cancelled = true;
     };
-  }, [router]);
+  }, []);
 
   if (checking) return <p className="fine">Opening the media desk…</p>;
   return storyId ? <StoryMedia id={storyId} /> : <MediaList />;
@@ -88,9 +85,6 @@ function MediaList() {
 
   return (
     <div className="desk media-desk">
-      <Link href="/chat-archives/desk" className="back">
-        ← Copy desk
-      </Link>
       <section className="desk-intro">
         <div className="kicker">Your images</div>
         <h1 className="hl">Media</h1>
@@ -195,9 +189,9 @@ function StoryMedia({ id }: { id: string }) {
               {failed ? ` · ${failed} failed` : ''}
               {pending ? ` · ${pending} waiting` : ''}
               {' · '}
-              <Link href={`/chat-archives/${encodeURIComponent(id)}?chat`} className="linkish">
+              <a href={`/chat-archives/${encodeURIComponent(id)}?chat`} className="linkish">
                 Read the story
-              </Link>
+              </a>
             </p>
             <div className="media-actions">
               {failed ? (

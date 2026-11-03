@@ -117,11 +117,13 @@ placeholder `generateStaticParams` plus that rewrite, not by changing the URL.
 **The shared site theme: site-shell.** The frontend Worker binds the Worker
 `site-shell` (`akshayDev17/site-themes`, `shell/`) as `SHELL` and passes every
 200 HTML page through its `compose()`, which inserts the theme's boot script and
-tokens right after `<meta charset>`. `/chat-archives/_site/*` forwards to
+tokens right after `<meta charset>`, and fills the masthead's
+`<site-slot name="site-path">` with the site path switcher (app `chat`, with each
+page's own crumbs as `data-tail`). `/chat-archives/_site/*` forwards to
 site-shell's own files (its picker script). It fails open: with site-shell
 missing, unreachable or throwing, `worker.js` fetches the page again and serves
 it exactly as built (Classic Light, from the `:where(:root)` fallback in
-`globals.css`, with no picker). The app bundles no theme code of its own.
+`globals.css`, with no picker, and a back link in place of the site path). The app bundles no theme code of its own.
 **Deploy order:** site-shell must exist before this Worker
 is deployed with the binding, or `wrangler deploy` refuses ("Worker A declares a
 binding to Worker B, which does not yet exist").
@@ -373,11 +375,14 @@ repository, as it gives access to deploy Workers on your account."
   scripts and once through pytest, then `npm ci`, `npm run test:lib`,
   `npm run test:worker`, `tsc --noEmit` and `npm run build:check`, then the
   export tests (`npm run test:export`: no bundled theme, the picker element,
-  tokens only in the fallback) and the site-shell contract: the static export
-  served by `wrangler dev` with
+  the site path slot with each page's crumbs and fallback, tokens only in the
+  fallback) and the site-shell contract: the static export served by
+  `wrangler dev` with
   `akshayDev17/site-themes` `main`'s site-shell (`npm run test:shell`), each
-  page also loaded in headless Chrome, which must hydrate with no console error
-  and upgrade `<site-theme-picker>`.
+  page also loaded in headless Chrome, which must hydrate with no console error,
+  upgrade `<site-theme-picker>` and keep the composed site path (AI Digest
+  current, the page's crumbs, 44 px targets, the bottom sheet on a portrait
+  phone).
 - **`deploy-api`** — `main` only, after `test` passes: a check, through
   the Cloudflare API, that the most specific self-hosted Access application
   covering `/api/desk/whoami` has an Allow policy and no Bypass policy (no

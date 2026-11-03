@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import Link from 'next/link';
 import { signOut, whoami } from '@/lib/api';
 import { AFTER_SIGN_OUT } from '@/lib/nav';
 
@@ -55,9 +54,9 @@ export default function MastheadActions() {
 
   return (
     <>
-      <Link href={signedIn ? '/chat-archives/desk' : '/chat-archives/login'} className="signin">
+      <a href={signedIn ? '/chat-archives/desk' : '/chat-archives/login'} className="signin">
         {signedIn ? 'Copy desk' : 'Sign in'} <span aria-hidden="true">→</span>
-      </Link>
+      </a>
       {signedIn ? <SignOut /> : null}
     </>
   );

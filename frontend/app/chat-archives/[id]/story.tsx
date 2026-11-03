@@ -38,7 +38,7 @@ export default function Story() {
 
   return (
     <>
-      <Masthead section="The reading room" />
+      <Masthead section="The reading room" tail={[{ label: 'The reading room' }]} />
       <SessionReader id={id} initialMode={initialMode} />
     </>
   );

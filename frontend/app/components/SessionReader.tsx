@@ -1,8 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
+import { usePathname } from 'next/navigation';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
@@ -85,7 +84,6 @@ export default function SessionReader({
   initialMode: ReaderMode;
 }) {
   const pathname = usePathname();
-  const router = useRouter();
   const [session, setSession] = useState<SessionDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<ReaderMode>(initialMode);
@@ -149,9 +147,6 @@ export default function SessionReader({
   return (
     <article className="reader">
       <div className="reader-top">
-        <Link href="/chat-archives" className="back">
-          ← All sessions
-        </Link>
         {filing.yours ? (
           <div className="reader-tools">
             {filing.images ? (
@@ -160,7 +155,7 @@ export default function SessionReader({
                 {imagesLabel(filing.images)} →
               </a>
             ) : null}
-            <Retract id={id} onRetracted={() => router.push('/chat-archives')} />
+            <Retract id={id} onRetracted={() => window.location.assign('/chat-archives')} />
           </div>
         ) : null}
       </div>

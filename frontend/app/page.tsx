@@ -1,4 +1,3 @@
-import Link from 'next/link';
 import Masthead from './components/Masthead';
 
 /**
@@ -12,7 +11,7 @@ export default function Home() {
       <div className="kicker">Elsewhere on this site</div>
       <h1 className="hl">The archive has moved</h1>
       <p className="standfirst">
-        The AI Digest lives at <Link href="/chat-archives">/chat-archives</Link>.
+        The AI Digest lives at <a href="/chat-archives">/chat-archives</a>.
         This root path belongs to the personal site.
       </p>
     </main>
