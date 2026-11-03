@@ -42,6 +42,17 @@ before(() => {
   build = JSON.parse(readFileSync(join(siteThemes, 'shell/generated/build.json'), 'utf8'));
 });
 
+// Not a failure: globals.css carries a one-time copy of site-shell's Classic
+// Light fallback, which only shows while site-shell is down. Say so when the
+// copy has drifted from the current one, so it can be refreshed.
+test('the Classic Light fallback in globals.css matches site-shell (advisory)', (t) => {
+  const block = (text) => text.split('\n').find((l) => l.startsWith(':where(:root){'));
+  const ours = block(readFileSync(join(frontend, 'app/globals.css'), 'utf8'));
+  const theirs = block(readFileSync(join(siteThemes, 'shell/generated/fallback.css'), 'utf8'));
+  assert.ok(ours, 'globals.css has the :where(:root) fallback block');
+  if (ours !== theirs) t.diagnostic('globals.css fallback differs from site-themes shell/generated/fallback.css: copy the new block in');
+});
+
 const scratch = mkdtempSync(join(tmpdir(), 'chat-shell-contract-'));
 after(() => rmSync(scratch, { recursive: true, force: true }));
 let nextPort = 18900;

@@ -1,14 +1,14 @@
 /* site-shell fallback: Classic Light when the shared tokens are missing.
    A verbatim copy of akshayDev17/site-themes shell/generated/fallback.css. The
-   shared tokens normally come from the theme (site-shell's composed <head>, and
-   site-themes/themes.css while the package is still imported), and many rules
-   here use them with no var() fallback. If that theme is ever missing, this
-   block keeps the page in Classic Light. :where() has zero specificity, so any
-   theme rule overrides it whatever the stylesheet order. */
+   shared tokens come from the theme block site-shell adds to every page's
+   <head>, and many rules here use them with no var() fallback. If that block is
+   ever missing (site-shell down, or `next dev`, which has no Worker), this
+   keeps the page in Classic Light. :where() has zero specificity, so any theme
+   rule overrides it whatever the stylesheet order. */
 :where(:root){color-scheme:light;--surface:#EEF1F8;--surface-2:#E2E8F4;--card:#FFFFFF;--text:#0F1220;--text-body:#232838;--text-muted:#525A6B;--line:#D3D9E6;--line-strong:#BCC4D6;--card-line:#818A9F;--card-line-hover:#5C6780;--accent:#3A4BD8;--focus:#0F1220;--danger:#B00020;--warn:#8A5A00;--ok:#1F6B45;--shadow-rest:0 1px 2px color-mix(in oklab, #0F1220 7%, transparent), 0 8px 20px -14px color-mix(in oklab, #0F1220 20%, transparent);--shadow-hover:0 2px 4px color-mix(in oklab, #0F1220 9%, transparent), 0 20px 40px -20px color-mix(in oklab, #0F1220 28%, transparent);--radius-card:.7rem;--font-serif:var(--font-newsreader, "Newsreader"), ui-serif, Georgia, serif;--font-mono:var(--font-plex-mono, "IBM Plex Mono"), ui-monospace, SFMono-Regular, Menlo, monospace}
 
-/* Colour, elevation, shape and fonts come from site-themes (themes.css, imported
-   before this file in layout.tsx). This block only aliases the app's own names
+/* Colour, elevation, shape and fonts come from the shared theme tokens (above).
+   This block only aliases the app's own names
    to the package tokens; the fallback in each var() is the Classic Light value.
    Never define a package token name (--accent, --card, --text, …) in a plain
    :root rule here: a later :root rule has the same specificity as [data-theme]
@@ -195,7 +195,7 @@ body {
   color: var(--accent);
 }
 
-/* The theme picker (site-themes' <site-theme-picker>, a labelled native select
+/* The theme picker (site-shell's <site-theme-picker>, a labelled native select
    drawn in its own shadow root). Same mono micro-caps and box as Sign in so the
    corner reads as one slot; colours come from the tokens inside the element. */
 .mh-theme::part(select) {
