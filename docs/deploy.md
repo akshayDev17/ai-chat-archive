@@ -375,7 +375,9 @@ repository, as it gives access to deploy Workers on your account."
   export tests (`npm run test:export`: no bundled theme, the picker element,
   tokens only in the fallback) and the site-shell contract: the static export
   served by `wrangler dev` with
-  `akshayDev17/site-themes` `main`'s site-shell (`npm run test:shell`).
+  `akshayDev17/site-themes` `main`'s site-shell (`npm run test:shell`), each
+  page also loaded in headless Chrome, which must hydrate with no console error
+  and upgrade `<site-theme-picker>`.
 - **`deploy-api`** — `main` only, after `test` passes: a check, through
   the Cloudflare API, that the most specific self-hosted Access application
   covering `/api/desk/whoami` has an Allow policy and no Bypass policy (no

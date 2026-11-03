@@ -230,7 +230,7 @@ cd frontend && npx tsc --noEmit && npm run build:check
 
 # the Worker: unit tests; then, on the static export in out/, the export tests
 # and the contract with the real site-shell (needs a checkout of
-# akshayDev17/site-themes)
+# akshayDev17/site-themes, and Google Chrome for the hydration check)
 cd frontend && npm run test:worker
 cd frontend && npm run build && npm run test:export && SITE_THEMES_DIR=../../site-themes npm run test:shell
 ```
