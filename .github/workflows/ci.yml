@@ -80,6 +80,10 @@ jobs:
         working-directory: frontend
         run: npm run test:lib
 
+      - name: Frontend — Worker tests
+        working-directory: frontend
+        run: npm run test:worker
+
       - name: Frontend — typecheck
         working-directory: frontend
         run: npx tsc --noEmit
@@ -90,6 +94,24 @@ jobs:
       - name: Frontend — production build
         working-directory: frontend
         run: npm run build:check
+
+      # The Worker against the real site-shell, in local workerd (no account):
+      # every page composed byte for byte, and the fail-open cases (unbound,
+      # site-shell not running, site-shell throwing). site-themes is public,
+      # and its main branch is what deploys site-shell. `build`, not
+      # `build:check`: wrangler.jsonc serves out/, which only `build` writes.
+      - uses: actions/checkout@v6
+        with:
+          repository: akshayDev17/site-themes
+          ref: main
+          path: site-themes
+
+      - name: Frontend — site-shell contract
+        working-directory: frontend
+        env:
+          NEXT_PUBLIC_API_BASE: ''
+          SITE_THEMES_DIR: ${{ github.workspace }}/site-themes
+        run: npm run build && npm run test:shell
 
   deploy-api:
     name: Deploy API

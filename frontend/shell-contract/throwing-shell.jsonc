@@ -1,0 +1,7 @@
+{
+  // Test only (contract.test.mjs): a site-shell whose compose() rejects, to
+  // prove worker.js fails open. Never deployed.
+  "name": "site-shell",
+  "main": "throwing-shell.js",
+  "compatibility_date": "2026-10-10"
+}
