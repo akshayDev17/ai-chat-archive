@@ -252,9 +252,9 @@ navigation. If site-shell is ever down, the page is served exactly as built:
 the `:where(:root)` Classic Light block at the top of `globals.css` keeps every
 shared token defined, the picker stays an empty element, and the slot keeps its
 fallback, a back link to the page's parent. `next dev` has no Worker in front of
-it, so the dev server looks the same way (Classic Light, no picker, back links). For theme work, run the export
-with site-shell: `npm run build && npx wrangler dev -c wrangler.jsonc -c
-<site-themes>/shell/wrangler.jsonc`.
+it, so the dev server looks the same way (Classic Light, no picker, back links).
+For theme work, run the export with site-shell: `npm run build && npx wrangler
+dev -c wrangler.jsonc -c <site-themes>/shell/wrangler.jsonc`.
 
 Use `build:check`, not `build`, while developing. `next dev` and `next build`
 both own `.next/` and both rewrite the webpack chunk graph inside it, so a plain

@@ -123,10 +123,10 @@ page's own crumbs as `data-tail`). `/chat-archives/_site/*` forwards to
 site-shell's own files (its picker script). It fails open: with site-shell
 missing, unreachable or throwing, `worker.js` fetches the page again and serves
 it exactly as built (Classic Light, from the `:where(:root)` fallback in
-`globals.css`, with no picker, and a back link in place of the site path). The app bundles no theme code of its own.
-**Deploy order:** site-shell must exist before this Worker
-is deployed with the binding, or `wrangler deploy` refuses ("Worker A declares a
-binding to Worker B, which does not yet exist").
+`globals.css`, with no picker, and a back link in place of the site path). The
+app bundles no theme code of its own. **Deploy order:** site-shell must exist
+before this Worker is deployed with the binding, or `wrangler deploy` refuses
+("Worker A declares a binding to Worker B, which does not yet exist").
 
 > Cloudflare recommends **vinext** over OpenNext for Next.js on Workers, but
 > vinext "Targets Next.js 16.x" and this app is on **15.5.27**. The docs route
