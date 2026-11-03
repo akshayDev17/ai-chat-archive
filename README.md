@@ -175,9 +175,10 @@ fails for that implementation specifically.
 ```
 frontend/
 ├── app/
-│   ├── layout.tsx              # fonts, metadata, site-themes boot script
+│   ├── layout.tsx              # fonts, metadata (the theme comes from site-shell)
 │   ├── page.tsx                # NOT the archive — points at /chat-archives
-│   ├── globals.css             # the design system, on site-themes tokens
+│   ├── globals.css             # the design system, on the shared theme tokens
+│   ├── site-theme-picker.d.ts  # JSX type for site-shell's <site-theme-picker>
 │   ├── chat-archives/page.tsx        # the edition (public)
 │   ├── chat-archives/login/page.tsx  # sign in (own path)
 │   ├── chat-archives/desk/page.tsx   # the copy desk — file a share link
@@ -203,6 +204,7 @@ frontend/
 ├── types/index.ts
 ├── worker.js                   # serves the export: story rewrite, site-shell theme (fails open)
 ├── worker.test.mjs             # worker.js with stand-in bindings
+├── export.test.mjs             # the static export carries no theme of its own
 ├── shell-contract/             # worker.js + the real site-shell in `wrangler dev`
 ├── wrangler.jsonc              # routes, static assets, the SHELL binding
 ├── package.json
@@ -227,20 +229,25 @@ cd frontend && npm install && npm run dev  # → http://127.0.0.1:3000
 # typecheck + production build — safe to run WHILE the dev server is up
 cd frontend && npx tsc --noEmit && npm run build:check
 
-# the Worker: unit tests, then the contract with the real site-shell
-# (needs the static export in out/ and a checkout of akshayDev17/site-themes)
+# the Worker: unit tests; then, on the static export in out/, the export tests
+# and the contract with the real site-shell (needs a checkout of
+# akshayDev17/site-themes, and Google Chrome for the hydration check)
 cd frontend && npm run test:worker
-cd frontend && npm run build && SITE_THEMES_DIR=../../site-themes npm run test:shell
+cd frontend && npm run build && npm run test:export && SITE_THEMES_DIR=../../site-themes npm run test:shell
 ```
 
-The shared site theme comes from site-shell (`akshayDev17/site-themes`,
-`shell/`). In production `worker.js` passes every HTML page through its
-`compose()` over the `SHELL` service binding, which adds the theme's boot script
-and tokens to `<head>`. `next dev` has no Worker in front of it, so the dev
-server shows the theme the app still bundles from the `site-themes` package.
-If site-shell is ever down, the page is served exactly as built, and the
-`:where(:root)` Classic Light block at the top of `globals.css` keeps every
-shared token defined.
+The shared site theme comes only from site-shell (`akshayDev17/site-themes`,
+`shell/`); the app bundles no theme code. In production `worker.js` passes every
+HTML page through its `compose()` over the `SHELL` service binding, which adds
+the theme's boot script and tokens to `<head>` and loads the script that
+defines `<site-theme-picker>`. A new theme or catalogue change reaches the app
+with site-shell's next deploy, with no change here. If site-shell is ever down,
+the page is served exactly as built: the `:where(:root)` Classic Light block at
+the top of `globals.css` keeps every shared token defined, and the picker stays
+an empty element. `next dev` has no Worker in front of it, so the dev server
+looks the same way (Classic Light, no picker). For theme work, run the export
+with site-shell: `npm run build && npx wrangler dev -c wrangler.jsonc -c
+<site-themes>/shell/wrangler.jsonc`.
 
 Use `build:check`, not `build`, while developing. `next dev` and `next build`
 both own `.next/` and both rewrite the webpack chunk graph inside it, so a plain

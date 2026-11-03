@@ -1,4 +1,3 @@
-import { ThemePicker } from 'site-themes/react';
 import MastheadActions from './MastheadActions';
 
 function edition(): string {
@@ -13,7 +12,9 @@ function edition(): string {
 }
 
 /**
- * The paper's nameplate. The top-right corner always holds the theme picker;
+ * The paper's nameplate. The top-right corner always holds the theme picker,
+ * <site-theme-picker>, which site-shell's site.js defines (it stays an empty
+ * element where site-shell is absent, such as `next dev`);
  * `actions` adds the auth-aware links beside it on the front page, and nothing
  * on the sign-in screen — there is no point offering "Sign in" to someone
  * already on the sign-in page.
@@ -34,7 +35,7 @@ export default function Masthead({
         </div>
         <div className="mh-actions">
           {actions ? <MastheadActions /> : null}
-          <ThemePicker hideLabel className="mh-theme" />
+          <site-theme-picker hide-label="" className="mh-theme" />
         </div>
       </div>
       <div className="tagline">An AI conversation newspaper · the sessions, as stories</div>

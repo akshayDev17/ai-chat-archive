@@ -11,6 +11,7 @@
     "lint": "next lint",
     "test:lib": "node --experimental-strip-types --test lib/*.test.ts",
     "test:worker": "node --test worker.test.mjs",
+    "test:export": "node --test export.test.mjs",
     "test:shell": "node --test shell-contract/contract.test.mjs"
   },
   "dependencies": {
@@ -20,13 +21,13 @@
     "react-dom": "^19.0.0",
     "react-markdown": "^10.1.0",
     "rehype-raw": "^7.0.0",
-    "remark-gfm": "^4.0.1",
-    "site-themes": "github:akshayDev17/site-themes#v0.2.0"
+    "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "playwright-core": "1.64.1",
     "typescript": "^5.6.0",
     "wrangler": "4.152.0"
   }

@@ -120,7 +120,9 @@ placeholder `generateStaticParams` plus that rewrite, not by changing the URL.
 tokens right after `<meta charset>`. `/chat-archives/_site/*` forwards to
 site-shell's own files (its picker script). It fails open: with site-shell
 missing, unreachable or throwing, `worker.js` fetches the page again and serves
-it exactly as built. **Deploy order:** site-shell must exist before this Worker
+it exactly as built (Classic Light, from the `:where(:root)` fallback in
+`globals.css`, with no picker). The app bundles no theme code of its own.
+**Deploy order:** site-shell must exist before this Worker
 is deployed with the binding, or `wrangler deploy` refuses ("Worker A declares a
 binding to Worker B, which does not yet exist").
 
@@ -370,8 +372,12 @@ repository, as it gives access to deploy Workers on your account."
 - **`test`** — runs on every push and pull request. Backend tests twice, once as
   scripts and once through pytest, then `npm ci`, `npm run test:lib`,
   `npm run test:worker`, `tsc --noEmit` and `npm run build:check`, then the
-  site-shell contract: the static export served by `wrangler dev` with
-  `akshayDev17/site-themes` `main`'s site-shell (`npm run test:shell`).
+  export tests (`npm run test:export`: no bundled theme, the picker element,
+  tokens only in the fallback) and the site-shell contract: the static export
+  served by `wrangler dev` with
+  `akshayDev17/site-themes` `main`'s site-shell (`npm run test:shell`), each
+  page also loaded in headless Chrome, which must hydrate with no console error
+  and upgrade `<site-theme-picker>`.
 - **`deploy-api`** — `main` only, after `test` passes: a check, through
   the Cloudflare API, that the most specific self-hosted Access application
   covering `/api/desk/whoami` has an Allow policy and no Bypass policy (no

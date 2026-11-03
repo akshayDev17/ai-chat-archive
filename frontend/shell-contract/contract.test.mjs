@@ -11,6 +11,8 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { chromium } from 'playwright-core';
+import { experimental_readRawConfig as readWranglerConfig } from 'wrangler';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const frontend = join(here, '..');
@@ -35,11 +37,17 @@ const PAGES = {
 };
 
 let build;
+// Where composed pages load site-shell's files from: site-shell's ASSET_BASE
+// var (the zone route akshayprabhakant.com/_site/*) when its config sets one,
+// which overrides the assetBase this app passes; otherwise the app's own
+// forwarded prefix.
+let assetBase;
 before(() => {
   assert.ok(siteThemes, 'set SITE_THEMES_DIR to a checkout of akshayDev17/site-themes');
   assert.ok(existsSync(SHELL), `no site-shell config at ${SHELL}`);
   assert.ok(existsSync(join(out, 'chat-archives.html')), 'no static export: run `npm run build` first');
   build = JSON.parse(readFileSync(join(siteThemes, 'shell/generated/build.json'), 'utf8'));
+  assetBase = readWranglerConfig({ config: SHELL }).rawConfig.vars?.ASSET_BASE ?? '/chat-archives/_site/';
 });
 
 const scratch = mkdtempSync(join(tmpdir(), 'chat-shell-contract-'));
@@ -81,7 +89,7 @@ const asBuilt = (file) => readFileSync(join(out, file), 'utf8');
 function composed(file) {
   const page = asBuilt(file);
   assert.equal(page.split(META).length, 2, `${file} has exactly one ${META}`);
-  const scripts = build.scripts.map((f) => `<script defer src="/chat-archives/_site/${build.id}/${f}"></script>`).join('');
+  const scripts = build.scripts.map((f) => `<script defer src="${assetBase}${build.id}/${f}"></script>`).join('');
   return page.replace(META, META + build.inline + scripts);
 }
 
@@ -117,6 +125,32 @@ test('bound to site-shell: every page gains the theme head block after <meta cha
   const missing = await fetch(`${s.base}/chat-archives/_site/000000000000/site.js`);
   assert.equal(missing.status, 404);
   assert.equal(missing.headers.get('cache-control'), 'no-store');
+});
+
+// In the installed Google Chrome (channel 'chrome'; GitHub's Ubuntu runners
+// ship it), so CI downloads no browser. Paths outside this Worker's routes
+// (wrangler.jsonc) are answered by others in production, the API Worker and
+// GitHub Pages (/favicon.ico), so their failed loads here are not counted.
+// /_site/* is site-shell's zone route; here the app Worker forwards it.
+const ROUTED = /^\/(chat-archives|_next|vendors|_site)(\/|$)/;
+
+test('bound to site-shell, in a browser: every page hydrates with no console error and upgrades <site-theme-picker>', async (t) => {
+  const s = await session(t, [APP, SHELL]);
+  const browser = await chromium.launch({ channel: 'chrome' });
+  t.after(() => browser.close());
+  for (const path of Object.keys(PAGES)) {
+    const page = await browser.newPage();
+    const errors = [];
+    page.on('pageerror', (err) => errors.push(String(err)));
+    page.on('console', (msg) => {
+      const from = msg.location().url;
+      if (msg.type() === 'error' && (!from || ROUTED.test(new URL(from).pathname))) errors.push(msg.text());
+    });
+    await page.goto(`${s.base}${path}`, { waitUntil: 'networkidle' });
+    await page.waitForSelector('site-theme-picker:defined', { state: 'attached', timeout: 10_000 });
+    assert.deepEqual(errors, [], `${path}: no hydration or console error`);
+    await page.close();
+  }
 });
 
 test('unbound: with no SHELL binding every page is served exactly as built', async (t) => {
