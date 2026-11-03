@@ -124,6 +124,14 @@ test('/chat-archives/_site/* forwards to site-shell with the prefix stripped', a
   assert.deepEqual(env.ASSETS.calls, []);
 });
 
+test('/_site/* forwards to site-shell as is (only under wrangler dev; the zone routes it to site-shell)', async () => {
+  const env = { ASSETS: assets(), SHELL: shell() };
+  const res = await get('/_site/1132669f0ee1/site.js', env);
+  assert.equal(await res.text(), 'site.js');
+  assert.deepEqual(env.SHELL.calls.fetch, ['/_site/1132669f0ee1/site.js']);
+  assert.deepEqual(env.ASSETS.calls, []);
+});
+
 test('/chat-archives/_site/* without SHELL falls through to ASSETS as before', async () => {
   const env = { ASSETS: assets(() => new Response('Not Found', { status: 404 })) };
   const res = await get('/chat-archives/_site/1132669f0ee1/site.js', env);

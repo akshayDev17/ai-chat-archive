@@ -13,17 +13,19 @@
  *
  * Every HTML page then passes through site-shell (the `SHELL` service binding,
  * akshayDev17/site-themes `shell/`), which adds the shared site theme to the
- * page's <head> as it streams out. `/chat-archives/_site/*` forwards to
- * site-shell's own files (its picker script), through this route until
- * akshayprabhakant.com/_site/* is routed to site-shell directly.
+ * page's <head> as it streams out. `/chat-archives/_site/*` and `/_site/*`
+ * forward to site-shell's own files (its picker script). In production the zone
+ * routes `/_site/*` to site-shell directly, so this Worker sees it only under
+ * `wrangler dev` (README: theme work), where it stands in for that route.
  */
 const PREFIX = '/chat-archives';
 
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    if (url.pathname.startsWith(`${PREFIX}/_site/`) && env.SHELL) {
-      return env.SHELL.fetch(new Request(new URL(url.pathname.slice(PREFIX.length), url), request));
+    const site = url.pathname.startsWith(`${PREFIX}/_site/`) ? url.pathname.slice(PREFIX.length) : url.pathname;
+    if (site.startsWith('/_site/') && env.SHELL) {
+      return env.SHELL.fetch(new Request(new URL(site, url), request));
     }
     // Share ids are UUIDs; `login`, `desk`, `_story`, and the front page are not.
     const target = /^\/chat-archives\/[0-9a-fA-F-]{36}\/?$/.test(url.pathname)
