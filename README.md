@@ -201,6 +201,10 @@ frontend/
 │   └── nav.ts                  # AFTER_SIGN_IN + safeNext (redirect guard)
 ├── public/vendors/            # chatgpt, gemini, claude marks (+ reserved slot)
 ├── types/index.ts
+├── worker.js                   # serves the export: story rewrite, site-shell theme (fails open)
+├── worker.test.mjs             # worker.js with stand-in bindings
+├── shell-contract/             # worker.js + the real site-shell in `wrangler dev`
+├── wrangler.jsonc              # routes, static assets, the SHELL binding
 ├── package.json
 └── tsconfig.json
 ```
@@ -222,7 +226,21 @@ cd frontend && npm install && npm run dev  # → http://127.0.0.1:3000
 
 # typecheck + production build — safe to run WHILE the dev server is up
 cd frontend && npx tsc --noEmit && npm run build:check
+
+# the Worker: unit tests, then the contract with the real site-shell
+# (needs the static export in out/ and a checkout of akshayDev17/site-themes)
+cd frontend && npm run test:worker
+cd frontend && npm run build && SITE_THEMES_DIR=../../site-themes npm run test:shell
 ```
+
+The shared site theme comes from site-shell (`akshayDev17/site-themes`,
+`shell/`). In production `worker.js` passes every HTML page through its
+`compose()` over the `SHELL` service binding, which adds the theme's boot script
+and tokens to `<head>`. `next dev` has no Worker in front of it, so the dev
+server shows the theme the app still bundles from the `site-themes` package.
+If site-shell is ever down, the page is served exactly as built, and the
+`:where(:root)` Classic Light block at the top of `globals.css` keeps every
+shared token defined.
 
 Use `build:check`, not `build`, while developing. `next dev` and `next build`
 both own `.next/` and both rewrite the webpack chunk graph inside it, so a plain

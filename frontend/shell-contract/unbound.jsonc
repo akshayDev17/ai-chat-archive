@@ -1,0 +1,8 @@
+{
+  // Test only (contract.test.mjs): the frontend Worker as deployed, minus the
+  // SHELL binding, to prove the page is served exactly as built without it.
+  "name": "ai-chat-archive-frontend",
+  "main": "../worker.js",
+  "compatibility_date": "2026-10-10",
+  "assets": { "directory": "../out", "binding": "ASSETS", "run_worker_first": true }
+}

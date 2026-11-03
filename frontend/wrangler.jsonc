@@ -23,5 +23,11 @@
     "directory": "./out",
     "binding": "ASSETS",
     "run_worker_first": true
-  }
+  },
+
+  // The shared site parts (the theme, for now): every HTML page goes through
+  // site-shell's compose() (akshayDev17/site-themes, shell/). site-shell must
+  // be deployed before this binding is, or this deploy fails. worker.js fails
+  // open: if site-shell is down, the page is served exactly as built.
+  "services": [{ "binding": "SHELL", "service": "site-shell" }]
 }

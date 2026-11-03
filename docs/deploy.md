@@ -114,6 +114,16 @@ The frontend is `output: 'export'` plus a tiny static-assets Worker
 `_story.html`. The "unbounded share ids" blocker above was solved with a
 placeholder `generateStaticParams` plus that rewrite, not by changing the URL.
 
+**The shared site theme: site-shell.** The frontend Worker binds the Worker
+`site-shell` (`akshayDev17/site-themes`, `shell/`) as `SHELL` and passes every
+200 HTML page through its `compose()`, which inserts the theme's boot script and
+tokens right after `<meta charset>`. `/chat-archives/_site/*` forwards to
+site-shell's own files (its picker script). It fails open: with site-shell
+missing, unreachable or throwing, `worker.js` fetches the page again and serves
+it exactly as built. **Deploy order:** site-shell must exist before this Worker
+is deployed with the binding, or `wrangler deploy` refuses ("Worker A declares a
+binding to Worker B, which does not yet exist").
+
 > Cloudflare recommends **vinext** over OpenNext for Next.js on Workers, but
 > vinext "Targets Next.js 16.x" and this app is on **15.5.27**. The docs route
 > existing apps to OpenNext: "Use this guide to maintain an existing OpenNext
@@ -359,7 +369,9 @@ repository, as it gives access to deploy Workers on your account."
 
 - **`test`** — runs on every push and pull request. Backend tests twice, once as
   scripts and once through pytest, then `npm ci`, `npm run test:lib`,
-  `tsc --noEmit` and `npm run build:check`.
+  `npm run test:worker`, `tsc --noEmit` and `npm run build:check`, then the
+  site-shell contract: the static export served by `wrangler dev` with
+  `akshayDev17/site-themes` `main`'s site-shell (`npm run test:shell`).
 - **`deploy-api`** — `main` only, after `test` passes: a check, through
   the Cloudflare API, that the most specific self-hosted Access application
   covering `/api/desk/whoami` has an Allow policy and no Bypass policy (no
