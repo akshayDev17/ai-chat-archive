@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { DEV_AUTH, devSignIn, signInUrl } from '@/lib/api';
 import { safeNext } from '@/lib/nav';
 
@@ -44,7 +43,6 @@ export default function AuthFlow({ next }: { next?: string | null }) {
 }
 
 function DevSignIn({ destination }: { destination: string }) {
-  const router = useRouter();
   const [stage, setStage] = useState<Stage>('email');
   const [email, setEmail] = useState('');
   const [digits, setDigits] = useState<string[]>(Array(6).fill(''));
@@ -174,7 +172,7 @@ function DevSignIn({ destination }: { destination: string }) {
       <div className="check" aria-hidden="true">✓</div>
       <h1 className="hl">You are on the desk</h1>
       <p className="standfirst">Signed in. The copy desk is open — file a share link to set it.</p>
-      <button type="button" className="btn" onClick={() => router.push(destination)}>
+      <button type="button" className="btn" onClick={() => window.location.assign(destination)}>
         Open the copy desk
       </button>
     </section>

@@ -1,7 +1,6 @@
 'use client';
 
 import { useMemo, type CSSProperties, type ReactNode } from 'react';
-import Link from 'next/link';
 import ReactMarkdown, { defaultUrlTransform, type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
@@ -298,9 +297,9 @@ const BLOCKS: Record<string, BlockRenderer> = {
     // Its real target is `sandbox:/mnt/data/…`, which exists only inside
     // ChatGPT. The report it downloads is this story's own Report tab.
     return (
-      <Link href={`/chat-archives/${ctx.storyId}`} className="gx-button">
+      <a href={`/chat-archives/${ctx.storyId}`} className="gx-button">
         {textOf(node.children) || 'Read the report'}
-      </Link>
+      </a>
     );
   },
   AsyncImage(node, ctx) {

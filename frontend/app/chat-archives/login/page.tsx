@@ -1,4 +1,5 @@
 import { Suspense } from 'react';
+import Masthead from '../../components/Masthead';
 import LoginClient from './client';
 
 /**
@@ -34,11 +35,14 @@ import LoginClient from './client';
  *
  * `?next` is read here (not on the front page) and handed to AuthFlow, which
  * sanitizes it before navigating. Static export has no server, so the query is
- * read client-side in `client.tsx`.
+ * read client-side in `client.tsx`. The masthead stays out here, outside the
+ * Suspense boundary, so it is in the exported HTML where site-shell fills its
+ * site path.
  */
 export default function LoginPage() {
   return (
     <main className="frame">
+      <Masthead section="Reader access" tail={[{ label: 'Reader access' }]} />
       <Suspense fallback={null}>
         <LoginClient />
       </Suspense>

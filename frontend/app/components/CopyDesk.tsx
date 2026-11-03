@@ -1,8 +1,6 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { ingestSession, isSignInRequired, signOut, whoami } from '@/lib/api';
 import { AFTER_SIGN_IN, AFTER_SIGN_OUT } from '@/lib/nav';
 import Retract from './Retract';
@@ -25,7 +23,6 @@ import Retract from './Retract';
  * `archive:updated` refreshes it.
  */
 export default function CopyDesk() {
-  const router = useRouter();
   const [email, setEmail] = useState<string | null>(null);
   const [checking, setChecking] = useState(true);
 
@@ -35,7 +32,7 @@ export default function CopyDesk() {
       .then((value) => {
         if (cancelled) return;
         if (!value) {
-          router.replace(`/chat-archives/login?next=${encodeURIComponent(AFTER_SIGN_IN)}`);
+          window.location.replace(`/chat-archives/login?next=${encodeURIComponent(AFTER_SIGN_IN)}`);
           return;
         }
         setEmail(value);
@@ -43,13 +40,13 @@ export default function CopyDesk() {
       })
       .catch(() => {
         if (!cancelled) {
-          router.replace(`/chat-archives/login?next=${encodeURIComponent(AFTER_SIGN_IN)}`);
+          window.location.replace(`/chat-archives/login?next=${encodeURIComponent(AFTER_SIGN_IN)}`);
         }
       });
     return () => {
       cancelled = true;
     };
-  }, [router]);
+  }, []);
 
   async function handleSignOut() {
     await signOut();
@@ -62,13 +59,6 @@ export default function CopyDesk() {
 
   return (
     <div className="desk">
-      {/* Mirrors the reader's "← All sessions": without it, the desk is a dead
-          end — the masthead here has no actions slot by design, so the only way
-          back to the paper would be the browser's back button. */}
-      <Link href="/chat-archives" className="back">
-        ← The edition
-      </Link>
-
       <section className="desk-intro">
         {/* The masthead already names the place ("Copy desk"), so the kicker
             names the task instead of repeating it. */}
@@ -81,9 +71,9 @@ export default function CopyDesk() {
         <p className="fine desk-who">
           Signed in as <em>{email}</em>
           {' · '}
-          <Link href="/chat-archives/desk/media" className="linkish">
+          <a href="/chat-archives/desk/media" className="linkish">
             Your images
-          </Link>
+          </a>
           {' · '}
           <button type="button" className="linkish" onClick={handleSignOut}>
             Sign out

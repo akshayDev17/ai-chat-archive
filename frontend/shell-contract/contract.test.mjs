@@ -10,7 +10,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { after, before, test } from 'node:test';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { chromium } from 'playwright-core';
 import { experimental_readRawConfig as readWranglerConfig } from 'wrangler';
 
@@ -35,18 +35,31 @@ const PAGES = {
   '/chat-archives/desk': 'chat-archives/desk.html',
   '/chat-archives/desk/media': 'chat-archives/desk/media.html',
 };
+// Each page's own crumbs in the site path after "AI Digest" (Masthead's `tail`).
+const TAILS = {
+  '/chat-archives': [],
+  [`/chat-archives/${STORY}`]: ['The reading room'],
+  '/chat-archives/login': ['Reader access'],
+  '/chat-archives/desk': ['Copy desk'],
+  '/chat-archives/desk/media': ['Copy desk', 'Media'],
+};
+// The site path slot, whose content site-shell replaces.
+const SLOT = /(<site-slot name="site-path"[^>]*>)([\s\S]*?)(<\/site-slot>)/;
 
 let build;
+// The listed apps, from the site-themes checkout's app list (its committed dist/).
+let listedApps;
 // Where composed pages load site-shell's files from: site-shell's ASSET_BASE
 // var (the zone route akshayprabhakant.com/_site/*) when its config sets one,
 // which overrides the assetBase this app passes; otherwise the app's own
 // forwarded prefix.
 let assetBase;
-before(() => {
+before(async () => {
   assert.ok(siteThemes, 'set SITE_THEMES_DIR to a checkout of akshayDev17/site-themes');
   assert.ok(existsSync(SHELL), `no site-shell config at ${SHELL}`);
   assert.ok(existsSync(join(out, 'chat-archives.html')), 'no static export: run `npm run build` first');
   build = JSON.parse(readFileSync(join(siteThemes, 'shell/generated/build.json'), 'utf8'));
+  listedApps = (await import(pathToFileURL(join(siteThemes, 'dist/apps.js')).href)).APPS.filter((a) => a.listed);
   assetBase = readWranglerConfig({ config: SHELL }).rawConfig.vars?.ASSET_BASE ?? '/chat-archives/_site/';
 });
 
@@ -85,15 +98,22 @@ async function logMatching(s, re) {
 }
 
 const asBuilt = (file) => readFileSync(join(out, file), 'utf8');
-/** The exported page plus site-shell's one insertion, right after its leading <meta charset>. */
-function composed(file) {
+/** The exported page plus site-shell's head insertion, right after its leading <meta charset>. */
+function composedHead(file) {
   const page = asBuilt(file);
   assert.equal(page.split(META).length, 2, `${file} has exactly one ${META}`);
   const scripts = build.scripts.map((f) => `<script defer src="${assetBase}${build.id}/${f}"></script>`).join('');
   return page.replace(META, META + build.inline + scripts);
 }
 
-test('bound to site-shell: every page gains the theme head block after <meta charset> and nothing else', async (t) => {
+/** The page with the site path slot's content cut out, and that content. */
+function splitSlot(html, label) {
+  const m = html.match(SLOT);
+  assert.ok(m, `${label}: has a site path slot`);
+  return { outside: html.replace(SLOT, '$1$3'), inner: m[2] };
+}
+
+test('bound to site-shell: every page gains the theme head block and the site path, and nothing else', async (t) => {
   const s = await session(t, [APP, SHELL]);
   for (const [path, file] of Object.entries(PAGES)) {
     const res = await fetch(`${s.base}${path}`);
@@ -101,9 +121,14 @@ test('bound to site-shell: every page gains the theme head block after <meta cha
     assert.equal(res.status, 200, path);
     assert.equal(res.headers.get('x-site-shell'), `${build.id}; app=chat`, path);
     assert.equal(res.headers.get('etag'), null, `${path}: composed HTML carries no validator`);
-    assert.equal(body, composed(file), `${path}: the exported page plus one insertion`);
+    const got = splitSlot(body, path);
+    const want = splitSlot(composedHead(file), file);
+    assert.equal(got.outside, want.outside, `${path}: outside the slot, the exported page plus the head insertion`);
+    assert.notEqual(got.inner, want.inner, `${path}: site-shell replaced the slot's fallback`);
+    assert.ok(got.inner.startsWith('<style data-site-shell>'), `${path}: the slot carries its own style`);
+    assert.match(got.inner, /<nav class="sp" aria-label="Site path">/, `${path}: the slot holds the site path`);
     assert.ok(body.indexOf(META) < 1024, `${path}: <meta charset> stays inside the first 1024 bytes`);
-    assert.equal(body.match(/data-site-shell/g).length, 2, `${path}: one boot <script> and one tokens <style>`);
+    assert.equal(body.match(/data-site-shell/g).length, 3, `${path}: the boot <script>, the tokens <style> and the slot's <style>`);
   }
 
   // Non-HTML passes through untouched, validators and 304 included.
@@ -151,6 +176,107 @@ test('bound to site-shell, in a browser: every page hydrates with no console err
     assert.deepEqual(errors, [], `${path}: no hydration or console error`);
     await page.close();
   }
+});
+
+/** What the site path shows once the page has hydrated, read from the live DOM. */
+function readSitePath(page) {
+  return page.evaluate(() => {
+    const visible = (el) => el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden';
+    const nav = document.querySelector('header.masthead > site-slot[name="site-path"] > nav.sp');
+    if (!nav) return null;
+    const current = nav.querySelector('.sp-apps .sp-app');
+    const pill = nav.querySelector('.sp-pill');
+    const pillBox = pill.getBoundingClientRect();
+    const at = (y) => document.elementFromPoint(pillBox.left + pillBox.width / 2, y);
+    return {
+      appsShown: visible(nav.querySelector('.sp-apps')),
+      appLinks: [...nav.querySelectorAll('.sp-apps a')].map((a) => a.getAttribute('href')),
+      current: current && { text: current.querySelector('.sp-label').textContent, ariaCurrent: current.getAttribute('aria-current') },
+      crumbs: [...nav.querySelectorAll('.sp-crumb')].filter(visible).map((c) => {
+        const el = c.querySelector('a, .sp-here');
+        return { text: el.textContent, href: el.getAttribute('href'), ariaCurrent: el.getAttribute('aria-current') };
+      }),
+      // Every visible link and button in the path, with its height.
+      targets: [...nav.querySelectorAll('a, .sp-here, button')].filter(visible)
+        .map((el) => ({ text: el.textContent, height: el.getBoundingClientRect().height })),
+      pill: visible(pill) && {
+        text: pill.firstChild.textContent,
+        // Its tap area reaches 5 px past the 34 px it is drawn at, top and bottom.
+        tapArea44: at(pillBox.top - 4.5) === pill && at(pillBox.bottom + 4.5) === pill,
+      },
+    };
+  });
+}
+
+/**
+ * A page signed in as far as the archive can tell: the desk and media pages
+ * send anyone else to sign in. The API is another Worker in production, so
+ * here its answers are stubbed in the browser.
+ */
+async function signedInPage(browser, viewport) {
+  const page = await browser.newPage({ viewport });
+  await page.route('**/api/desk/whoami', (r) => r.fulfill({ json: { email: 'reader@example.com' } }));
+  await page.route('**/api/desk/media', (r) => r.fulfill({ json: { filings: [] } }));
+  return page;
+}
+
+test('bound to site-shell, in a browser: every page shows the site path, with AI Digest current and its own crumbs', async (t) => {
+  const s = await session(t, [APP, SHELL]);
+  const browser = await chromium.launch({ channel: 'chrome' });
+  t.after(() => browser.close());
+  const appPaths = listedApps.map((a) => a.path);
+  for (const [path, tail] of Object.entries(TAILS)) {
+    for (const viewport of [{ width: 1440, height: 900 }, { width: 1280, height: 800 }, { width: 844, height: 390 }]) {
+      const page = await signedInPage(browser, viewport);
+      await page.goto(`${s.base}${path}`, { waitUntil: 'networkidle' });
+      const at = `${path} at ${viewport.width}x${viewport.height}`;
+      assert.equal(new URL(page.url()).pathname, path, `${at}: stayed on the page`);
+      const sp = await readSitePath(page);
+      assert.ok(sp, `${at}: the composed site path survives hydration`);
+      assert.ok(sp.appsShown, `${at}: the apps sit inline`);
+      assert.equal(sp.pill, false, `${at}: no pill where the apps fit`);
+      assert.deepEqual(sp.appLinks.sort(), appPaths.filter((p) => p !== '/chat-archives' || tail.length).sort(),
+        `${at}: a link to every listed app (AI Digest is plain text at its root)`);
+      assert.deepEqual(sp.current, { text: 'AI Digest', ariaCurrent: tail.length ? 'true' : 'page' }, `${at}: AI Digest is current`);
+      assert.deepEqual(sp.crumbs.map((c) => c.text), tail, `${at}: the page's own crumbs`);
+      if (tail.length) assert.equal(sp.crumbs.at(-1).ariaCurrent, 'page', `${at}: the last crumb is this page`);
+      for (const { text, height } of sp.targets) assert.ok(height >= 44, `${at}: "${text}" is ${height}px tall, under 44px`);
+      await page.close();
+    }
+
+    // Portrait phone: the apps fold into the pill, which opens the bottom sheet.
+    const page = await signedInPage(browser, { width: 390, height: 844 });
+    await page.goto(`${s.base}${path}`, { waitUntil: 'networkidle' });
+    const sp = await readSitePath(page);
+    assert.ok(sp, `${path} on a phone: the composed site path survives hydration`);
+    assert.equal(sp.appsShown, false, `${path} on a phone: the apps fold away`);
+    assert.deepEqual(sp.pill, { text: 'AI Digest', tapArea44: true }, `${path} on a phone: the AI Digest pill, 44px to tap`);
+    assert.deepEqual(sp.crumbs.map((c) => c.text), tail.slice(-1), `${path} on a phone: only the last crumb`);
+    await page.click('.sp-pill');
+    const sheet = page.locator('dialog.sp-sheet');
+    await sheet.waitFor({ state: 'visible' });
+    const sheetLinks = await sheet.locator('ul a').evaluateAll((as) => as.map((a) => ({ href: a.getAttribute('href'), current: a.getAttribute('aria-current') })));
+    assert.deepEqual(sheetLinks.map((l) => l.href), appPaths, `${path} on a phone: the sheet lists every listed app`);
+    assert.deepEqual(sheetLinks.filter((l) => l.current).map((l) => l.href), ['/chat-archives'], `${path} on a phone: AI Digest is marked`);
+    await sheet.getByRole('button', { name: 'Close' }).click();
+    await sheet.waitFor({ state: 'hidden' });
+    await page.close();
+  }
+});
+
+// site-shell fills the slot only in a page loaded as a document, so a link
+// between the archive's pages must not be a Next.js client-side navigation.
+test('bound to site-shell, in a browser: following the masthead\'s Sign in lands on a page with the site path', async (t) => {
+  const s = await session(t, [APP, SHELL]);
+  const browser = await chromium.launch({ channel: 'chrome' });
+  t.after(() => browser.close());
+  const page = await browser.newPage();
+  await page.goto(`${s.base}/chat-archives`, { waitUntil: 'networkidle' });
+  await Promise.all([page.waitForURL('**/chat-archives/login'), page.click('.mh-actions .signin')]);
+  await page.waitForLoadState('networkidle');
+  const sp = await readSitePath(page);
+  assert.ok(sp, 'the sign-in screen shows the composed site path');
+  assert.deepEqual(sp.crumbs.map((c) => c.text), ['Reader access']);
 });
 
 test('unbound: with no SHELL binding every page is served exactly as built', async (t) => {

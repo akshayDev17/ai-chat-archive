@@ -3,13 +3,13 @@
  *
  * The sign-in screen accepts a `next` parameter so that a visitor bounced from
  * the copy desk lands back on the copy desk rather than on the front page. That
- * value becomes a `router.push()` target, so it is sanitized the same way the
- * backend sanitizes its `Location` header (`chat_archive/urls.py`): a same-site
- * absolute path, or nothing.
+ * value becomes a `window.location.assign()` target, so it is sanitized the same
+ * way the backend sanitizes its `Location` header (`chat_archive/urls.py`): a
+ * same-site absolute path, or nothing.
  *
  * The backend guards its own copy of this for the `/api/desk/enter`
  * redirect. Duplicating the rule on both sides is deliberate — they are
- * different sinks (a `Location` header versus a client-side navigation) reached
+ * different sinks (a `Location` header versus a script-driven navigation) reached
  * by different code paths, and either one being unguarded is a phishing bug.
  */
 

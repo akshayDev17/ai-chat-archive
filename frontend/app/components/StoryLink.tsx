@@ -1,6 +1,5 @@
 'use client';
 
-import Link from 'next/link';
 import { imagesLabel, mediaHref, type MediaCounts } from '@/lib/media';
 import { byline, headline, teaser } from '@/lib/story';
 import type { Session } from '@/types';
@@ -26,7 +25,7 @@ export default function StoryLink({ session, variant, images }: Props) {
 
   return (
     <div className={`story story-${variant}`}>
-      <Link className="story-card" href={`/chat-archives/${encodeURIComponent(session.id)}`}>
+      <a className="story-card" href={`/chat-archives/${encodeURIComponent(session.id)}`}>
         {variant !== 'flow' ? <div className="kicker">Lead</div> : null}
 
         {variant === 'flow' ? (
@@ -38,7 +37,7 @@ export default function StoryLink({ session, variant, images }: Props) {
         <div className="by">{byline(session)}</div>
         {standfirst ? <p className="tease">{standfirst}</p> : null}
         <span className="read">Read the report →</span>
-      </Link>
+      </a>
       {images ? (
         // A full navigation: the media page reads `?id` once, on load.
         <a className="story-media" href={mediaHref(session.id)}>

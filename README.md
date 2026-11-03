@@ -178,13 +178,13 @@ frontend/
 │   ├── layout.tsx              # fonts, metadata (the theme comes from site-shell)
 │   ├── page.tsx                # NOT the archive — points at /chat-archives
 │   ├── globals.css             # the design system, on the shared theme tokens
-│   ├── site-theme-picker.d.ts  # JSX type for site-shell's <site-theme-picker>
+│   ├── site-theme-picker.d.ts  # JSX types for site-shell's <site-theme-picker> and <site-slot>
 │   ├── chat-archives/page.tsx        # the edition (public)
 │   ├── chat-archives/login/page.tsx  # sign in (own path)
 │   ├── chat-archives/desk/page.tsx   # the copy desk — file a share link
 │   ├── chat-archives/[id]/page.tsx   # the reader (?chat for the transcript)
 │   └── components/
-│       ├── Masthead.tsx        # the nameplate + theme picker
+│       ├── Masthead.tsx        # the site path slot, the nameplate + theme picker
 │       ├── MastheadActions.tsx # auth links: Sign in, or Copy desk
 │       ├── FrontPage.tsx       # leads + ragged columns
 │       ├── CopyDesk.tsx        # the filing form + your recent filings
@@ -240,14 +240,21 @@ The shared site theme comes only from site-shell (`akshayDev17/site-themes`,
 `shell/`); the app bundles no theme code. In production `worker.js` passes every
 HTML page through its `compose()` over the `SHELL` service binding, which adds
 the theme's boot script and tokens to `<head>` and loads the script that
-defines `<site-theme-picker>`. A new theme or catalogue change reaches the app
-with site-shell's next deploy, with no change here. If site-shell is ever down,
-the page is served exactly as built: the `:where(:root)` Classic Light block at
-the top of `globals.css` keeps every shared token defined, and the picker stays
-an empty element. `next dev` has no Worker in front of it, so the dev server
-looks the same way (Classic Light, no picker). For theme work, run the export
-with site-shell: `npm run build && npx wrangler dev -c wrangler.jsonc -c
-<site-themes>/shell/wrangler.jsonc`.
+defines `<site-theme-picker>`. It also fills the masthead's
+`<site-slot name="site-path">` with the site path: the switcher across every app
+on akshayprabhakant.com, AI Digest marked as current, then the page's own
+crumbs from `Masthead`'s `tail` (Copy desk, Media, The reading room, Reader
+access). A new theme, catalogue change or app list change reaches the app with
+site-shell's next deploy, with no change here. site-shell fills the slot only in
+a page loaded as a document, so links between the archive's pages are plain
+`<a>` and navigations use `window.location`, never a Next.js client-side
+navigation. If site-shell is ever down, the page is served exactly as built:
+the `:where(:root)` Classic Light block at the top of `globals.css` keeps every
+shared token defined, the picker stays an empty element, and the slot keeps its
+fallback, a back link to the page's parent. `next dev` has no Worker in front of
+it, so the dev server looks the same way (Classic Light, no picker, back links).
+For theme work, run the export with site-shell: `npm run build && npx wrangler
+dev -c wrangler.jsonc -c <site-themes>/shell/wrangler.jsonc`.
 
 Use `build:check`, not `build`, while developing. `next dev` and `next build`
 both own `.next/` and both rewrite the webpack chunk graph inside it, so a plain

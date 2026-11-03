@@ -1,7 +1,8 @@
 // The static export carries no theme of its own: site-shell owns the boot
 // script, the theme tokens and the picker's definition, and adds them at the
-// edge (worker.js). What the export must still carry is the picker element and
-// the Classic Light fallback for when site-shell is absent.
+// edge (worker.js). What the export must still carry is the picker element,
+// the site path slot that site-shell fills, and the Classic Light fallback for
+// when site-shell is absent.
 //
 //   npm run build && npm run test:export
 import assert from 'node:assert/strict';
@@ -45,12 +46,35 @@ test('no exported page carries a theme boot script or theme tokens of its own', 
   }
 });
 
-// Login is left out: its masthead renders on the client (inside a Suspense
-// boundary for the search params), so its exported HTML has none yet.
-test('every prerendered masthead renders the plain <site-theme-picker hide-label> element', () => {
-  for (const name of ['chat-archives.html', 'chat-archives/desk.html', 'chat-archives/desk/media.html', 'chat-archives/_story.html']) {
+// Each exported page, its crumbs after "AI Digest" in the site path, and the
+// back link its slot shows when site-shell does not fill it.
+const MASTHEADS = {
+  'chat-archives.html': { tail: null, fallback: '' },
+  'chat-archives/_story.html': { tail: [{ label: 'The reading room' }], fallback: '<a class="back" href="/chat-archives">← The edition</a>' },
+  'chat-archives/login.html': { tail: [{ label: 'Reader access' }], fallback: '<a class="back" href="/chat-archives">← The edition</a>' },
+  'chat-archives/desk.html': { tail: [{ label: 'Copy desk' }], fallback: '<a class="back" href="/chat-archives">← The edition</a>' },
+  'chat-archives/desk/media.html': {
+    tail: [{ label: 'Copy desk', href: '/chat-archives/desk' }, { label: 'Media' }],
+    fallback: '<a class="back" href="/chat-archives/desk">← Copy desk</a>',
+  },
+};
+
+test('every masthead is prerendered with the plain <site-theme-picker hide-label> element', () => {
+  for (const name of Object.keys(MASTHEADS)) {
     const html = readFileSync(join(out, name), 'utf8');
     assert.match(html, /<site-theme-picker hide-label="" class="mh-theme"><\/site-theme-picker>/, name);
+  }
+});
+
+test('every masthead opens with the site path slot: its own crumbs as data-tail, its back link as the fallback', () => {
+  for (const [name, { tail, fallback }] of Object.entries(MASTHEADS)) {
+    const html = readFileSync(join(out, name), 'utf8');
+    const slots = [...html.matchAll(/<header class="masthead"><site-slot name="site-path"( data-tail="([^"]*)")?>([\s\S]*?)<\/site-slot>/g)];
+    assert.equal(slots.length, 1, `${name}: one site path slot, first in the masthead`);
+    const [, , rawTail, inner] = slots[0];
+    const decoded = rawTail?.replace(/&quot;/g, '"').replace(/&amp;/g, '&');
+    assert.deepEqual(decoded === undefined ? null : JSON.parse(decoded), tail, `${name}: data-tail`);
+    assert.equal(inner, fallback, `${name}: fallback`);
   }
 });
 

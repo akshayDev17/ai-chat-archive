@@ -26,7 +26,7 @@ import Masthead from '../../components/Masthead';
 export default function DeskPage() {
   return (
     <main className="frame">
-      <Masthead section="Copy desk" />
+      <Masthead section="Copy desk" tail={[{ label: 'Copy desk' }]} />
       <CopyDesk />
     </main>
   );

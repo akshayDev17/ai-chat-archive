@@ -11,7 +11,10 @@ import Masthead from '../../../components/Masthead';
 export default function MediaPage() {
   return (
     <main className="frame">
-      <Masthead section="Copy desk · Media" />
+      <Masthead
+        section="Copy desk · Media"
+        tail={[{ label: 'Copy desk', href: '/chat-archives/desk' }, { label: 'Media' }]}
+      />
       <MediaDesk />
     </main>
   );
