@@ -204,6 +204,7 @@ frontend/
 ├── types/index.ts
 ├── worker.js                   # serves the export: story rewrite, site-shell theme (fails open)
 ├── worker.test.mjs             # worker.js with stand-in bindings
+├── export.test.mjs             # the static export carries no theme of its own
 ├── shell-contract/             # worker.js + the real site-shell in `wrangler dev`
 ├── wrangler.jsonc              # routes, static assets, the SHELL binding
 ├── package.json
