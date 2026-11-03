@@ -1,6 +1,6 @@
 // worker.js with stand-in bindings: the story rewrite, the site-shell hook and
 // its fail-open paths. The real compose() runs only in workerd; that pairing is
-// covered by shell-contract.test.mjs.
+// covered by shell-contract/contract.test.mjs.
 //
 //   node --test worker.test.mjs
 import assert from 'node:assert/strict';
