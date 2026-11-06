@@ -1,7 +1,8 @@
 // On a phone, no page of the static export lays out wider than the screen.
 // One element wider than the viewport makes a phone browser zoom the whole
 // page out, which shrinks every line of text with it. Nor does a table cell
-// split a word to make it fit: a wide table scrolls. The test loads each
+// split a word to make it fit: a wide table scrolls inside its own box, and
+// a narrow one still spans the column. The test loads each
 // exported page in Chrome's phone emulation (the installed Google Chrome,
 // channel 'chrome', as test:shell uses), serving out/ directly, and a story
 // from a fixture holding what filed stories really carry: bare URLs, a wide
@@ -24,6 +25,7 @@ const STORY = '6ac877f9-c690-83ec-8394-61b0727ba5eb';
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.woff2': 'font/woff2' };
 
 const LONG_URL = 'https://www.example.gov/BlobFolder/dynamiccollectorresultitem/prospectuses_18k_report_2021/en/annual-report-appendix-full-text.pdf';
+const NARROW_TABLE = ['| Key | Value |', '| --- | --- |', '| State | Delhi |'].join('\n');
 const STORY_BODY = {
   id: STORY,
   title: 'A story with wide content',
@@ -38,6 +40,8 @@ const STORY_BODY = {
     '| Scenario | Existing tariff | Agreed terms | Result | Notes |',
     '| --- | --- | --- | --- | --- |',
     `| Excluded | Existing tariff remains | Tariff reduced/changed according to agreed terms | Unchanged | ${LONG_URL} |`,
+    '',
+    NARROW_TABLE,
     '',
     '```text',
     'GMR Group  ──  GMR Airports Ltd.  ←  listed  ──  Delhi International Airport Ltd. (DIAL)  ──  64% stake',
@@ -54,6 +58,8 @@ const STORY_BODY = {
         '| Scenario | Existing tariff | Agreed terms | Result | Notes |',
         '| --- | --- | --- | --- | --- |',
         `| Excluded | Existing tariff remains | Tariff reduced/changed according to agreed terms | Unchanged | ${LONG_URL} |`,
+        '',
+        NARROW_TABLE,
       ].join('\n'),
       sources: [],
     },
@@ -105,7 +111,7 @@ async function phone(width, height, colorScheme) {
 
 for (const colorScheme of ['light', 'dark']) {
   for (const [width, height] of [[360, 800], [390, 844], [412, 915], [844, 390], [915, 412]]) {
-    test(`at ${width}x${height} (${colorScheme}), every page lays out at exactly the screen width, table words whole`, async () => {
+    test(`at ${width}x${height} (${colorScheme}), every page lays out at exactly the screen width, tables whole`, async () => {
       const ctx = await phone(width, height, colorScheme);
       const page = await ctx.newPage();
       try {
@@ -141,6 +147,32 @@ for (const colorScheme of ['light', 'dark']) {
           });
           if (path.includes(STORY)) assert.ok(cells > 0, `${path}: the story's table did not render`);
           assert.deepEqual(split, [], `${path}: words split inside table cells`);
+          // A table that fits still spans the column; a wider one scrolls
+          // inside its own box rather than widening the page.
+          const tables = await page.evaluate(() =>
+            [...document.querySelectorAll('.report table, .plain table')].map((table) => {
+              const box = table.parentElement;
+              return {
+                wide: table.textContent.includes('https://'),
+                inBox: box.classList.contains('table-scroll'),
+                table: Math.round(table.getBoundingClientRect().width),
+                box: box.clientWidth,
+                scroll: box.scrollWidth,
+                overflowX: getComputedStyle(box).overflowX,
+              };
+            }),
+          );
+          if (path.includes(STORY)) {
+            assert.ok(tables.some((t) => t.wide) && tables.some((t) => !t.wide), `${path}: the story's tables did not render`);
+          }
+          for (const t of tables) {
+            assert.ok(t.inBox, `${path}: a table is not in its scrolling box`);
+            if (t.wide) {
+              assert.ok(t.overflowX === 'auto' && t.scroll > t.box, `${path}: the wide table does not scroll inside its box: ${JSON.stringify(t)}`);
+            } else {
+              assert.ok(Math.abs(t.table - t.box) <= 1, `${path}: the narrow table does not span the column: ${JSON.stringify(t)}`);
+            }
+          }
         }
       } finally {
         await ctx.close();
