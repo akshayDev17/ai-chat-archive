@@ -235,10 +235,10 @@ cd frontend && npx tsc --noEmit && npm run build:check
 cd frontend && npm run test:worker
 cd frontend && npm run build && npm run test:export && SITE_THEMES_DIR=../../site-themes npm run test:shell
 
-# on the same export (built with NEXT_PUBLIC_API_BASE='' so the reader asks
-# its own origin): every page, a story with bare URLs and wide tables included,
-# lays out at exactly the screen width on a phone (Google Chrome)
-cd frontend && npm run test:layout
+# on an export built with NEXT_PUBLIC_API_BASE='' (so the reader asks its own
+# origin): every page, a story with bare URLs and wide tables included, lays
+# out at exactly the screen width on a phone, upright and sideways (Google Chrome)
+cd frontend && NEXT_PUBLIC_API_BASE= npm run build && npm run test:layout
 ```
 
 The shared site theme comes only from site-shell (`akshayDev17/site-themes`,

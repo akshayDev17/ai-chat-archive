@@ -85,8 +85,8 @@ before(async () => {
 });
 after(() => browser?.close());
 
-async function phone(width, colorScheme) {
-  const ctx = await browser.newContext({ viewport: { width, height: 800 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true, colorScheme });
+async function phone(width, height, colorScheme) {
+  const ctx = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 3, isMobile: true, hasTouch: true, colorScheme });
   await ctx.route('**/*', (route) => {
     const url = new URL(route.request().url());
     if (url.origin !== ORIGIN) return route.abort();
@@ -103,9 +103,9 @@ async function phone(width, colorScheme) {
 }
 
 for (const colorScheme of ['light', 'dark']) {
-  for (const width of [360, 390, 412]) {
-    test(`at ${width} px (${colorScheme}), every page lays out at exactly the screen width`, async () => {
-      const ctx = await phone(width, colorScheme);
+  for (const [width, height] of [[360, 800], [390, 844], [412, 915], [844, 390], [915, 412]]) {
+    test(`at ${width}x${height} (${colorScheme}), every page lays out at exactly the screen width`, async () => {
+      const ctx = await phone(width, height, colorScheme);
       const page = await ctx.newPage();
       try {
         for (const [path, marker] of Object.entries(PAGES)) {

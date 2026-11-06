@@ -1118,9 +1118,10 @@ body {
    else fits, and also lets a table's columns shrink past such a token so the
    table fits the column. A code block keeps its lines and scrolls inside
    itself instead.
-   Phone widths only: on a desktop column `anywhere` also redistributes table
-   columns, and the desktop layout stays as it was. */
-@media (max-width: 640px) {
+   Phones only, held either way (a narrow screen or a touch pointer): on a
+   desktop column `anywhere` also redistributes table columns, and the desktop
+   layout stays as it was. */
+@media (max-width: 640px), (pointer: coarse) {
   .report, .bubble, .plain, .story-card { overflow-wrap: anywhere; }
   .report pre { overflow-x: auto; }
 }
