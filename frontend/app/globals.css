@@ -1110,6 +1110,21 @@ body {
 .plain pre code { background: none; padding: 0; font-size: inherit; }
 .plain hr { border: none; border-top: 1px solid var(--rule); margin: var(--s4) 0; }
 
+/* On a phone, story text never sets the page wider than the screen: the
+   report, the transcript, and the front page's cards, whose teaser quotes the
+   report. Filed stories carry long unbroken tokens (bare URLs, plugin links)
+   that a phone column cannot hold, and a single one widens the layout so the
+   browser zooms the whole page out. `anywhere` breaks them only where nothing
+   else fits, and also lets a table's columns shrink past such a token so the
+   table fits the column. A code block keeps its lines and scrolls inside
+   itself instead.
+   Phone widths only: on a desktop column `anywhere` also redistributes table
+   columns, and the desktop layout stays as it was. */
+@media (max-width: 640px) {
+  .report, .bubble, .plain, .story-card { overflow-wrap: anywhere; }
+  .report pre { overflow-x: auto; }
+}
+
 /* ── GenUI replies (app/components/GenUI.tsx) ──────────
    ChatGPT's component markup — cards, icon rows, grids, image mosaics — drawn
    the way ChatGPT draws it, in the archive's tokens. Containers are flex

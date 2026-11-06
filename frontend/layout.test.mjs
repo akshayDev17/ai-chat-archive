@@ -1,0 +1,128 @@
+// On a phone, no page of the static export lays out wider than the screen.
+// One element wider than the viewport makes a phone browser zoom the whole
+// page out, which shrinks every line of text with it. The test loads each
+// exported page in Chrome's phone emulation (the installed Google Chrome,
+// channel 'chrome', as test:shell uses), serving out/ directly, and a story
+// from a fixture holding what filed stories really carry: bare URLs, a wide
+// table, a code block, and a long unbroken token in a user turn.
+//
+// The export must be built with NEXT_PUBLIC_API_BASE='' (as CI builds it), so
+// the reader asks its own origin for the story, which the test answers.
+//
+//   NEXT_PUBLIC_API_BASE= npm run build && npm run test:layout
+import assert from 'node:assert/strict';
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, extname, join } from 'node:path';
+import { after, before, test } from 'node:test';
+import { fileURLToPath } from 'node:url';
+import { chromium } from 'playwright-core';
+
+const out = join(dirname(fileURLToPath(import.meta.url)), 'out');
+const ORIGIN = 'http://archive.test';
+const STORY = '6ac877f9-c690-83ec-8394-61b0727ba5eb';
+const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.woff2': 'font/woff2' };
+
+const LONG_URL = 'https://www.example.gov/BlobFolder/dynamiccollectorresultitem/prospectuses_18k_report_2021/en/annual-report-appendix-full-text.pdf';
+const STORY_BODY = {
+  id: STORY,
+  title: 'A story with wide content',
+  source: 'chatgpt',
+  report: [
+    '# A story with wide content',
+    '',
+    `A bare link in running text: ${LONG_URL}`,
+    '',
+    `- A bare link in a list: ${LONG_URL}`,
+    '',
+    '| Scenario | Existing tariff | Agreed terms | Result | Notes |',
+    '| --- | --- | --- | --- | --- |',
+    `| Excluded | Existing tariff remains | Tariff reduced/changed according to agreed terms | Unchanged | ${LONG_URL} |`,
+    '',
+    '```text',
+    'GMR Group  ──  GMR Airports Ltd.  ←  listed  ──  Delhi International Airport Ltd. (DIAL)  ──  64% stake',
+    '```',
+  ].join('\n'),
+  citations: [],
+  messages: [
+    { role: 'user', content: `[$chat-to-markdown-report](app://plugins_6ac7f272fb048191ac6a4770a335b24d) ${LONG_URL}`, sources: [] },
+    {
+      role: 'assistant',
+      content: [
+        `See ${LONG_URL}`,
+        '',
+        '| Scenario | Existing tariff | Agreed terms | Result | Notes |',
+        '| --- | --- | --- | --- | --- |',
+        `| Excluded | Existing tariff remains | Tariff reduced/changed according to agreed terms | Unchanged | ${LONG_URL} |`,
+      ].join('\n'),
+      sources: [],
+    },
+  ],
+};
+
+const LISTED = { id: STORY, title: STORY_BODY.title, created_at: '2026-11-06T10:00:00+00:00', source: 'chatgpt', markdown: STORY_BODY.report };
+
+// Each page, and the text that shows it has rendered.
+const PAGES = {
+  '/chat-archives': 'A story with wide content',
+  '/chat-archives/login': 'Sign in to the archive',
+  '/chat-archives/desk': 'File a session',
+  '/chat-archives/desk/media': 'Pictures in your filed stories',
+  [`/chat-archives/${STORY}`]: 'A bare link in running text',
+  [`/chat-archives/${STORY}?chat`]: 'Verbatim transcript',
+};
+
+/** The exported file the Worker serves for a path (worker.js, plus the assets' clean URLs). */
+function exported(pathname) {
+  if (/^\/chat-archives\/[0-9a-f-]{36}\/?$/.test(pathname)) return 'chat-archives/_story.html';
+  const file = decodeURIComponent(pathname).replace(/^\//, '');
+  return extname(file) ? file : `${file}.html`;
+}
+
+let browser;
+before(async () => {
+  assert.ok(existsSync(join(out, 'chat-archives.html')), 'no static export: run `npm run build` first');
+  browser = await chromium.launch({ channel: 'chrome' });
+});
+after(() => browser?.close());
+
+async function phone(width, colorScheme) {
+  const ctx = await browser.newContext({ viewport: { width, height: 800 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true, colorScheme });
+  await ctx.route('**/*', (route) => {
+    const url = new URL(route.request().url());
+    if (url.origin !== ORIGIN) return route.abort();
+    if (url.pathname === `/api/sessions/${STORY}`) return route.fulfill({ json: STORY_BODY });
+    if (url.pathname === '/api/sessions') return route.fulfill({ json: { sessions: [LISTED] } });
+    if (url.pathname === '/api/desk/whoami') return route.fulfill({ json: { email: 'reader@example.com' } });
+    if (url.pathname === '/api/desk/media') return route.fulfill({ json: { filings: [] } });
+    if (url.pathname.startsWith('/api/')) return route.fulfill({ status: 404, json: { error: 'not found' } });
+    const file = join(out, exported(url.pathname));
+    if (!existsSync(file)) return route.fulfill({ status: 404, body: '' });
+    return route.fulfill({ body: readFileSync(file), contentType: TYPES[extname(file)] ?? 'application/octet-stream' });
+  });
+  return ctx;
+}
+
+for (const colorScheme of ['light', 'dark']) {
+  for (const width of [360, 390, 412]) {
+    test(`at ${width} px (${colorScheme}), every page lays out at exactly the screen width`, async () => {
+      const ctx = await phone(width, colorScheme);
+      const page = await ctx.newPage();
+      try {
+        for (const [path, marker] of Object.entries(PAGES)) {
+          await page.goto(`${ORIGIN}${path}`);
+          await page.getByText(marker).first().waitFor({ timeout: 10_000 });
+          await page.waitForLoadState('networkidle');
+          // A phone browser widens innerWidth to fit content wider than the
+          // screen, so both are measured against the screen width.
+          const { scrollWidth, innerWidth } = await page.evaluate(() => ({
+            scrollWidth: document.documentElement.scrollWidth,
+            innerWidth: window.innerWidth,
+          }));
+          assert.deepEqual({ scrollWidth, innerWidth }, { scrollWidth: width, innerWidth: width }, path);
+        }
+      } finally {
+        await ctx.close();
+      }
+    });
+  }
+}
