@@ -382,7 +382,10 @@ repository, as it gives access to deploy Workers on your account."
   page also loaded in headless Chrome, which must hydrate with no console error,
   upgrade `<site-theme-picker>` and keep the composed site row and trail (AI
   Digest current, one line of 44 px targets that scrolls sideways on a portrait
-  phone, the page's trail on its own line under it).
+  phone, the page's trail on its own line under it), then the phone layout test
+  on that export (`npm run test:layout`: every page, a story with bare URLs and
+  wide tables included, lays out at exactly the screen width in Chrome's phone
+  emulation, upright and sideways).
 - **`deploy-api`** — `main` only, after `test` passes: a check, through
   the Cloudflare API, that the most specific self-hosted Access application
   covering `/api/desk/whoami` has an Allow policy and no Bypass policy (no
