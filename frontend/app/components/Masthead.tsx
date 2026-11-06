@@ -38,8 +38,8 @@ function edition(): string {
 
 /**
  * The paper's nameplate. Above it, the site path: `<site-slot name="site-path">`,
- * which site-shell fills with the switcher across every app on the site
- * followed by `tail`, this page's own crumbs (akshayDev17/site-themes README,
+ * which site-shell fills with the row of every app on the site and, on its
+ * own line under it, a trail ending in `tail`, this page's own crumbs (akshayDev17/site-themes README,
  * "What compose() adds"). Its content is rendered once, as HTML that React
  * never compares or replaces, so hydration keeps what site-shell put there.
  * Where site-shell does not run, the slot keeps the back link from

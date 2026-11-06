@@ -118,7 +118,7 @@ placeholder `generateStaticParams` plus that rewrite, not by changing the URL.
 `site-shell` (`akshayDev17/site-themes`, `shell/`) as `SHELL` and passes every
 200 HTML page through its `compose()`, which inserts the theme's boot script and
 tokens right after `<meta charset>`, and fills the masthead's
-`<site-slot name="site-path">` with the site path switcher (app `chat`, with each
+`<site-slot name="site-path">` with the site row and trail (app `chat`, with each
 page's own crumbs as `data-tail`). `/chat-archives/_site/*` forwards to
 site-shell's own files (its picker script). It fails open: with site-shell
 missing, unreachable or throwing, `worker.js` fetches the page again and serves
@@ -380,9 +380,9 @@ repository, as it gives access to deploy Workers on your account."
   `wrangler dev` with
   `akshayDev17/site-themes` `main`'s site-shell (`npm run test:shell`), each
   page also loaded in headless Chrome, which must hydrate with no console error,
-  upgrade `<site-theme-picker>` and keep the composed site path (AI Digest
-  current, the page's crumbs, 44 px targets, the bottom sheet on a portrait
-  phone).
+  upgrade `<site-theme-picker>` and keep the composed site row and trail (AI
+  Digest current, one line of 44 px targets that scrolls sideways on a portrait
+  phone, the page's trail on its own line under it).
 - **`deploy-api`** — `main` only, after `test` passes: a check, through
   the Cloudflare API, that the most specific self-hosted Access application
   covering `/api/desk/whoami` has an Allow policy and no Bypass policy (no
