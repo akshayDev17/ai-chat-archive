@@ -206,6 +206,7 @@ frontend/
 ├── worker.test.mjs             # worker.js with stand-in bindings
 ├── export.test.mjs             # the static export carries no theme of its own
 ├── shell-contract/             # worker.js + the real site-shell in `wrangler dev`
+├── layout.test.mjs             # every exported page fits a phone's screen width
 ├── wrangler.jsonc              # routes, static assets, the SHELL binding
 ├── package.json
 └── tsconfig.json
@@ -234,6 +235,11 @@ cd frontend && npx tsc --noEmit && npm run build:check
 # akshayDev17/site-themes, and Google Chrome for the hydration check)
 cd frontend && npm run test:worker
 cd frontend && npm run build && npm run test:export && SITE_THEMES_DIR=../../site-themes npm run test:shell
+
+# on an export built with NEXT_PUBLIC_API_BASE='' (so the reader asks its own
+# origin): every page, a story with bare URLs and wide tables included, lays
+# out at exactly the screen width on a phone, upright and sideways (Google Chrome)
+cd frontend && NEXT_PUBLIC_API_BASE= npm run build && npm run test:layout
 ```
 
 The shared site theme comes only from site-shell (`akshayDev17/site-themes`,

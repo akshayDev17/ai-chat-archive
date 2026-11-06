@@ -12,7 +12,8 @@
     "test:lib": "node --experimental-strip-types --test lib/*.test.ts",
     "test:worker": "node --test worker.test.mjs",
     "test:export": "node --test export.test.mjs",
-    "test:shell": "node --test shell-contract/contract.test.mjs"
+    "test:shell": "node --test shell-contract/contract.test.mjs",
+    "test:layout": "node --test layout.test.mjs"
   },
   "dependencies": {
     "lucide-react": "1.55.0",

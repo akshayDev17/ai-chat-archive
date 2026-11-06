@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { usePathname } from 'next/navigation';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
 import { filingStatus, getSession, type FilingStatus } from '@/lib/api';
@@ -14,9 +14,12 @@ import { vendorLabel, vendorMark } from '@/lib/vendors';
 import type { SessionDetail, Source } from '@/types';
 import GenUIMessage from './GenUI';
 import Retract from './Retract';
+import ScrollingTable from './ScrollingTable';
 import SourcesPanel from './SourcesPanel';
 
 export type ReaderMode = 'report' | 'chat';
+
+const MARKDOWN_COMPONENTS: Components = { table: ScrollingTable };
 
 /**
  * The mark beside each assistant turn: the vendor that produced the reply.
@@ -194,7 +197,7 @@ export default function SessionReader({
 
       {mode === 'report' ? (
         <div className="report">
-          <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>
+          <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]} components={MARKDOWN_COMPONENTS}>
             {report}
           </ReactMarkdown>
         </div>
@@ -244,7 +247,9 @@ export default function SessionReader({
                           storyId={id}
                         />
                       ) : (
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{item.content}</ReactMarkdown>
+                        <ReactMarkdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS}>
+                          {item.content}
+                        </ReactMarkdown>
                       )}
                     </div>
                     <div className="acts">

@@ -38,6 +38,7 @@ import {
   type GenNode,
 } from '@/lib/genui';
 import type { MediaItem, Source } from '@/types';
+import ScrollingTable from './ScrollingTable';
 
 /**
  * A GenUI reply, rendered from its component markup.
@@ -182,6 +183,7 @@ function InlineRun({ nodes, ctx }: { nodes: GenNode[]; ctx: Context }) {
 
 function inlineComponents(entities: EntityRef[]): Components {
   return {
+    table: ScrollingTable,
     a({ href, children }) {
       if (href?.startsWith('genui-entity:')) {
         const entity = entities[Number(href.slice('genui-entity:'.length))];
@@ -363,7 +365,9 @@ export default function GenUIMessage({
 
   if (!tree) {
     return (
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>{stripGenUI(text)}</ReactMarkdown>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ table: ScrollingTable }}>
+        {stripGenUI(text)}
+      </ReactMarkdown>
     );
   }
   return <div className="genui">{renderChildren(tree, ctx)}</div>;

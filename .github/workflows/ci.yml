@@ -117,6 +117,13 @@ jobs:
           SITE_THEMES_DIR: ${{ github.workspace }}/site-themes
         run: npm run build && npm run test:export && npm run test:shell
 
+      # On that export: in Chrome's phone emulation, every page lays out at
+      # exactly the screen width, a story with bare URLs and wide tables
+      # included, so a phone never zooms the page out.
+      - name: Frontend — phone layout
+        working-directory: frontend
+        run: npm run test:layout
+
   deploy-api:
     name: Deploy API
     runs-on: ubuntu-latest
