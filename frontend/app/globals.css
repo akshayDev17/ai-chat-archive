@@ -1560,4 +1560,11 @@ body {
   .disclaimer {
     font-size: 0.75rem;
   }
+
+  .report th code,
+  .report th a[href^='#ref-'],
+  .plain table code,
+  .plain .gx-sm code:not(pre > code) {
+    font-size: max(0.75rem, 0.85em);
+  }
 }
