@@ -1520,3 +1520,44 @@ body {
   background: color-mix(in oklab, var(--accent) 18%, transparent);
   border-radius: 3px;
 }
+
+/* ── phones: no text below 12px ────────────────────── */
+/* The mono micro-caps (kicker, byline, stamps, masthead edition, source list
+   meta) are 10-11px, which reads as tiny on a phone held at arm's length and
+   fails Lighthouse's legible-font-size audit. Phones only lift them to 12px;
+   the desktop declarations above stay as they are, so wide screens are
+   unchanged. Body text is not touched. */
+@media (max-width: 640px) {
+  .masthead .edition,
+  .masthead .tagline,
+  .signin,
+  .signout,
+  .mh-theme::part(select),
+  .media-count,
+  .media-state,
+  .media-meta,
+  .file-form label,
+  .file-msg,
+  .kicker,
+  .fine,
+  .field label,
+  .story-media,
+  .by,
+  .read,
+  .back,
+  .retract,
+  .retract-confirm,
+  .report th,
+  .stamp,
+  .sysnote,
+  .chip-inline,
+  .src-head-title,
+  .src-count,
+  .src-domain,
+  .src-meta,
+  .src-num,
+  .toolnote,
+  .disclaimer {
+    font-size: 0.75rem;
+  }
+}
