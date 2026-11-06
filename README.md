@@ -206,6 +206,7 @@ frontend/
 ├── worker.test.mjs             # worker.js with stand-in bindings
 ├── export.test.mjs             # the static export carries no theme of its own
 ├── shell-contract/             # worker.js + the real site-shell in `wrangler dev`
+├── layout.test.mjs             # every exported page fits a phone's screen width
 ├── wrangler.jsonc              # routes, static assets, the SHELL binding
 ├── package.json
 └── tsconfig.json
