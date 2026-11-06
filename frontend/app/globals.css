@@ -1115,14 +1115,15 @@ body {
    report. Filed stories carry long unbroken tokens (bare URLs, plugin links)
    that a phone column cannot hold, and a single one widens the layout so the
    browser zooms the whole page out. `anywhere` breaks them only where nothing
-   else fits, and also lets a table's columns shrink past such a token so the
-   table fits the column. A code block keeps its lines and scrolls inside
-   itself instead.
-   Phones only, held either way (a narrow screen or a touch pointer): on a
-   desktop column `anywhere` also redistributes table columns, and the desktop
-   layout stays as it was. */
+   else fits. Table cells keep whole words instead (`anywhere` would let a
+   column shrink to a letter and split short words), so a table wider than the
+   column scrolls inside itself, as a code block does.
+   Phones only, held either way (a narrow screen or a touch pointer), so the
+   desktop layout stays as it was. */
 @media (max-width: 640px), (pointer: coarse) {
   .report, .bubble, .plain, .story-card { overflow-wrap: anywhere; }
+  .report th, .report td, .plain th, .plain td { overflow-wrap: break-word; }
+  .report table, .plain table { display: block; overflow-x: auto; }
   .report pre { overflow-x: auto; }
 }
 

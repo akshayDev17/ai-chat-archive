@@ -1,6 +1,7 @@
 // On a phone, no page of the static export lays out wider than the screen.
 // One element wider than the viewport makes a phone browser zoom the whole
-// page out, which shrinks every line of text with it. The test loads each
+// page out, which shrinks every line of text with it. Nor does a table cell
+// split a word to make it fit: a wide table scrolls. The test loads each
 // exported page in Chrome's phone emulation (the installed Google Chrome,
 // channel 'chrome', as test:shell uses), serving out/ directly, and a story
 // from a fixture holding what filed stories really carry: bare URLs, a wide
@@ -104,7 +105,7 @@ async function phone(width, height, colorScheme) {
 
 for (const colorScheme of ['light', 'dark']) {
   for (const [width, height] of [[360, 800], [390, 844], [412, 915], [844, 390], [915, 412]]) {
-    test(`at ${width}x${height} (${colorScheme}), every page lays out at exactly the screen width`, async () => {
+    test(`at ${width}x${height} (${colorScheme}), every page lays out at exactly the screen width, table words whole`, async () => {
       const ctx = await phone(width, height, colorScheme);
       const page = await ctx.newPage();
       try {
@@ -119,6 +120,27 @@ for (const colorScheme of ['light', 'dark']) {
             innerWidth: window.innerWidth,
           }));
           assert.deepEqual({ scrollWidth, innerWidth }, { scrollWidth: width, innerWidth: width }, path);
+          // A table cell never splits a word across lines: a run of letters
+          // and digits drawn as more than one box has been broken mid-word
+          // (a line may still end after a hyphen or a space).
+          const { cells, split } = await page.evaluate(() => {
+            const found = [...document.querySelectorAll('.report th, .report td, .plain th, .plain td')];
+            const broken = [];
+            for (const cell of found) {
+              const walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT);
+              for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+                for (const word of node.data.matchAll(/[\p{L}\p{N}]+/gu)) {
+                  const range = document.createRange();
+                  range.setStart(node, word.index);
+                  range.setEnd(node, word.index + word[0].length);
+                  if (range.getClientRects().length > 1) broken.push(word[0]);
+                }
+              }
+            }
+            return { cells: found.length, split: broken };
+          });
+          if (path.includes(STORY)) assert.ok(cells > 0, `${path}: the story's table did not render`);
+          assert.deepEqual(split, [], `${path}: words split inside table cells`);
         }
       } finally {
         await ctx.close();
