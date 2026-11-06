@@ -14,7 +14,7 @@ declare module 'react' {
         label?: string;
       };
       'site-slot': DetailedHTMLProps<HTMLAttributes<HTMLElement>, HTMLElement> & {
-        /** Which slot: 'site-path' (the switcher) or 'site-apps'. */
+        /** Which slot: 'site-path' (the site row and trail) or 'site-apps'. */
         name: 'site-path' | 'site-apps';
         /** site-path only: this page's crumbs after the app name, as JSON. */
         'data-tail'?: string;

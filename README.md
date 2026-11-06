@@ -244,8 +244,9 @@ defines `<site-theme-picker>`. It also fills the masthead's
 `<site-slot name="site-path">` with the site row: a link to every app on
 akshayprabhakant.com, AI Digest marked as current, and under it, on its own
 line, the page's trail, AI Digest then the page's own crumbs from `Masthead`'s
-`tail` (Copy desk, Media, The reading room, Reader access). A new theme, catalogue change or app list change reaches the app with
-site-shell's next deploy, with no change here. site-shell fills the slot only in
+`tail` (Copy desk, Media, The reading room, Reader access). A new theme,
+catalogue change or app list change reaches the app with site-shell's next
+deploy, with no change here. site-shell fills the slot only in
 a page loaded as a document, so links between the archive's pages are plain
 `<a>` and navigations use `window.location`, never a Next.js client-side
 navigation. If site-shell is ever down, the page is served exactly as built:
