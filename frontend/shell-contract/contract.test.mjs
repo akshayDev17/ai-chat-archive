@@ -35,13 +35,14 @@ const PAGES = {
   '/chat-archives/desk': 'chat-archives/desk.html',
   '/chat-archives/desk/media': 'chat-archives/desk/media.html',
 };
-// Each page's own crumbs in the site path after "AI Digest" (Masthead's `tail`).
-const TAILS = {
+// Each page's trail under the site row: AI Digest (a link to its root), then
+// the page's own crumbs (Masthead's `tail`). None at the app's root.
+const TRAILS = {
   '/chat-archives': [],
-  [`/chat-archives/${STORY}`]: ['The reading room'],
-  '/chat-archives/login': ['Reader access'],
-  '/chat-archives/desk': ['Copy desk'],
-  '/chat-archives/desk/media': ['Copy desk', 'Media'],
+  [`/chat-archives/${STORY}`]: [['AI Digest', '/chat-archives'], ['The reading room']],
+  '/chat-archives/login': [['AI Digest', '/chat-archives'], ['Reader access']],
+  '/chat-archives/desk': [['AI Digest', '/chat-archives'], ['Copy desk']],
+  '/chat-archives/desk/media': [['AI Digest', '/chat-archives'], ['Copy desk', '/chat-archives/desk'], ['Media']],
 };
 // The site path slot, whose content site-shell replaces.
 const SLOT = /(<site-slot name="site-path"[^>]*>)([\s\S]*?)(<\/site-slot>)/;
@@ -113,7 +114,7 @@ function splitSlot(html, label) {
   return { outside: html.replace(SLOT, '$1$3'), inner: m[2] };
 }
 
-test('bound to site-shell: every page gains the theme head block and the site path, and nothing else', async (t) => {
+test('bound to site-shell: every page gains the theme head block and the site row and trail, and nothing else', async (t) => {
   const s = await session(t, [APP, SHELL]);
   for (const [path, file] of Object.entries(PAGES)) {
     const res = await fetch(`${s.base}${path}`);
@@ -126,7 +127,9 @@ test('bound to site-shell: every page gains the theme head block and the site pa
     assert.equal(got.outside, want.outside, `${path}: outside the slot, the exported page plus the head insertion`);
     assert.notEqual(got.inner, want.inner, `${path}: site-shell replaced the slot's fallback`);
     assert.ok(got.inner.startsWith('<style data-site-shell>'), `${path}: the slot carries its own style`);
-    assert.match(got.inner, /<nav class="sp" aria-label="Site path">/, `${path}: the slot holds the site path`);
+    assert.match(got.inner, /<nav class="sp" aria-label="Site"><ul class="sp-apps">/, `${path}: the slot holds the site row`);
+    assert.equal(got.inner.includes('<nav class="sp-trail" aria-label="Breadcrumb">'), TRAILS[path].length > 0,
+      `${path}: the slot holds the page's trail, except at the app's root`);
     assert.ok(body.indexOf(META) < 1024, `${path}: <meta charset> stays inside the first 1024 bytes`);
     assert.equal(body.match(/data-site-shell/g).length, 3, `${path}: the boot <script>, the tokens <style> and the slot's <style>`);
   }
@@ -178,31 +181,33 @@ test('bound to site-shell, in a browser: every page hydrates with no console err
   }
 });
 
-/** What the site path shows once the page has hydrated, read from the live DOM. */
+/** What the site row and trail show once the page has hydrated, read from the live DOM. */
 function readSitePath(page) {
   return page.evaluate(() => {
     const visible = (el) => el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden';
-    const nav = document.querySelector('header.masthead > site-slot[name="site-path"] > nav.sp');
+    const slot = document.querySelector('header.masthead > site-slot[name="site-path"]');
+    const nav = slot?.querySelector(':scope > nav.sp');
     if (!nav) return null;
-    const current = nav.querySelector('.sp-apps .sp-app');
-    const pill = nav.querySelector('.sp-pill');
-    const pillBox = pill.getBoundingClientRect();
-    const at = (y) => document.elementFromPoint(pillBox.left + pillBox.width / 2, y);
+    const row = nav.querySelector('.sp-apps');
+    const rowBox = row.getBoundingClientRect();
+    const current = row.querySelector('.sp-app');
+    const currentBox = current?.getBoundingClientRect();
+    const trail = slot.querySelector(':scope > nav.sp-trail');
+    const items = [...row.querySelectorAll('li')];
     return {
-      appsShown: visible(nav.querySelector('.sp-apps')),
-      appLinks: [...nav.querySelectorAll('.sp-apps a')].map((a) => a.getAttribute('href')),
-      current: current && { text: current.querySelector('.sp-label').textContent, ariaCurrent: current.getAttribute('aria-current') },
-      crumbs: [...nav.querySelectorAll('.sp-crumb')].filter(visible).map((c) => {
-        const el = c.querySelector('a, .sp-here');
-        return { text: el.textContent, href: el.getAttribute('href'), ariaCurrent: el.getAttribute('aria-current') };
-      }),
-      // Every visible link and button in the path, with its height.
-      targets: [...nav.querySelectorAll('a, .sp-here, button')].filter(visible)
-        .map((el) => ({ text: el.textContent, height: el.getBoundingClientRect().height })),
-      pill: visible(pill) && {
-        text: pill.firstChild.textContent,
-        // Its tap area reaches 5 px past the 34 px it is drawn at, top and bottom.
-        tapArea44: at(pillBox.top - 4.5) === pill && at(pillBox.bottom + 4.5) === pill,
+      appLinks: [...row.querySelectorAll('a')].map((a) => a.getAttribute('href')),
+      current: current && { text: current.querySelector('.sp-label').textContent, href: current.getAttribute('href'), ariaCurrent: current.getAttribute('aria-current') },
+      oneLine: items.every((li) => li.getBoundingClientRect().top === items[0].getBoundingClientRect().top),
+      currentInView: !!currentBox && currentBox.left >= rowBox.left - 0.5 && currentBox.right <= rowBox.right + 0.5,
+      pageScrollsSideways: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+      rowHeights: [...row.querySelectorAll('a')].filter(visible)
+        .map((a) => ({ text: a.textContent, height: a.getBoundingClientRect().height })),
+      trail: trail && visible(trail) && {
+        below: trail.getBoundingClientRect().top >= rowBox.bottom - 0.5,
+        crumbs: [...trail.querySelectorAll('li')].map((li) => {
+          const el = li.firstElementChild;
+          return { text: el.textContent, href: el.getAttribute('href'), ariaCurrent: el.getAttribute('aria-current'), height: el.getBoundingClientRect().height };
+        }),
       },
     };
   });
@@ -220,53 +225,42 @@ async function signedInPage(browser, viewport) {
   return page;
 }
 
-test('bound to site-shell, in a browser: every page shows the site path, with AI Digest current and its own crumbs', async (t) => {
+test('bound to site-shell, in a browser: every page shows the site row, with AI Digest current, and its own trail', async (t) => {
   const s = await session(t, [APP, SHELL]);
   const browser = await chromium.launch({ channel: 'chrome' });
   t.after(() => browser.close());
   const appPaths = listedApps.map((a) => a.path);
-  for (const [path, tail] of Object.entries(TAILS)) {
-    for (const viewport of [{ width: 1440, height: 900 }, { width: 1280, height: 800 }, { width: 844, height: 390 }]) {
+  for (const [path, trail] of Object.entries(TRAILS)) {
+    for (const viewport of [{ width: 1440, height: 900 }, { width: 1280, height: 800 }, { width: 844, height: 390 }, { width: 390, height: 844 }]) {
       const page = await signedInPage(browser, viewport);
       await page.goto(`${s.base}${path}`, { waitUntil: 'networkidle' });
       const at = `${path} at ${viewport.width}x${viewport.height}`;
       assert.equal(new URL(page.url()).pathname, path, `${at}: stayed on the page`);
       const sp = await readSitePath(page);
-      assert.ok(sp, `${at}: the composed site path survives hydration`);
-      assert.ok(sp.appsShown, `${at}: the apps sit inline`);
-      assert.equal(sp.pill, false, `${at}: no pill where the apps fit`);
-      assert.deepEqual(sp.appLinks.sort(), appPaths.filter((p) => p !== '/chat-archives' || tail.length).sort(),
-        `${at}: a link to every listed app (AI Digest is plain text at its root)`);
-      assert.deepEqual(sp.current, { text: 'AI Digest', ariaCurrent: tail.length ? 'true' : 'page' }, `${at}: AI Digest is current`);
-      assert.deepEqual(sp.crumbs.map((c) => c.text), tail, `${at}: the page's own crumbs`);
-      if (tail.length) assert.equal(sp.crumbs.at(-1).ariaCurrent, 'page', `${at}: the last crumb is this page`);
-      for (const { text, height } of sp.targets) assert.ok(height >= 44, `${at}: "${text}" is ${height}px tall, under 44px`);
+      assert.ok(sp, `${at}: the composed site row survives hydration`);
+      assert.deepEqual(sp.appLinks, appPaths, `${at}: a link to every listed app, in list order`);
+      assert.deepEqual(sp.current, { text: 'AI Digest', href: '/chat-archives', ariaCurrent: trail.length ? 'true' : 'page' }, `${at}: AI Digest is current`);
+      assert.ok(sp.oneLine, `${at}: the row is one line`);
+      assert.ok(sp.currentInView, `${at}: AI Digest is in view in the row`);
+      assert.equal(sp.pageScrollsSideways, false, `${at}: the page does not scroll sideways`);
+      for (const { text, height } of sp.rowHeights) assert.ok(height >= 44, `${at}: "${text}" is ${height}px tall, under 44px`);
+      if (!trail.length) {
+        assert.equal(sp.trail, null, `${at}: no trail at the app's root`);
+      } else {
+        assert.ok(sp.trail, `${at}: the trail is shown`);
+        assert.ok(sp.trail.below, `${at}: the trail is its own line under the row`);
+        assert.deepEqual(sp.trail.crumbs.map((c) => [c.text, c.href]), trail.map(([text, href]) => [text, href ?? null]), `${at}: the page's trail`);
+        assert.equal(sp.trail.crumbs.at(-1).ariaCurrent, 'page', `${at}: the last crumb is this page`);
+        for (const { text, height, href } of sp.trail.crumbs) if (href) assert.ok(height >= 32, `${at}: "${text}" is ${height}px tall, under 32px`);
+      }
       await page.close();
     }
-
-    // Portrait phone: the apps fold into the pill, which opens the bottom sheet.
-    const page = await signedInPage(browser, { width: 390, height: 844 });
-    await page.goto(`${s.base}${path}`, { waitUntil: 'networkidle' });
-    const sp = await readSitePath(page);
-    assert.ok(sp, `${path} on a phone: the composed site path survives hydration`);
-    assert.equal(sp.appsShown, false, `${path} on a phone: the apps fold away`);
-    assert.deepEqual(sp.pill, { text: 'AI Digest', tapArea44: true }, `${path} on a phone: the AI Digest pill, 44px to tap`);
-    assert.deepEqual(sp.crumbs.map((c) => c.text), tail.slice(-1), `${path} on a phone: only the last crumb`);
-    await page.click('.sp-pill');
-    const sheet = page.locator('dialog.sp-sheet');
-    await sheet.waitFor({ state: 'visible' });
-    const sheetLinks = await sheet.locator('ul a').evaluateAll((as) => as.map((a) => ({ href: a.getAttribute('href'), current: a.getAttribute('aria-current') })));
-    assert.deepEqual(sheetLinks.map((l) => l.href), appPaths, `${path} on a phone: the sheet lists every listed app`);
-    assert.deepEqual(sheetLinks.filter((l) => l.current).map((l) => l.href), ['/chat-archives'], `${path} on a phone: AI Digest is marked`);
-    await sheet.getByRole('button', { name: 'Close' }).click();
-    await sheet.waitFor({ state: 'hidden' });
-    await page.close();
   }
 });
 
 // site-shell fills the slot only in a page loaded as a document, so a link
 // between the archive's pages must not be a Next.js client-side navigation.
-test('bound to site-shell, in a browser: following the masthead\'s Sign in lands on a page with the site path', async (t) => {
+test('bound to site-shell, in a browser: following the masthead\'s Sign in lands on a page with the site row and trail', async (t) => {
   const s = await session(t, [APP, SHELL]);
   const browser = await chromium.launch({ channel: 'chrome' });
   t.after(() => browser.close());
@@ -275,8 +269,8 @@ test('bound to site-shell, in a browser: following the masthead\'s Sign in lands
   await Promise.all([page.waitForURL('**/chat-archives/login'), page.click('.mh-actions .signin')]);
   await page.waitForLoadState('networkidle');
   const sp = await readSitePath(page);
-  assert.ok(sp, 'the sign-in screen shows the composed site path');
-  assert.deepEqual(sp.crumbs.map((c) => c.text), ['Reader access']);
+  assert.ok(sp, 'the sign-in screen shows the composed site row');
+  assert.deepEqual(sp.trail?.crumbs.map((c) => c.text), ['AI Digest', 'Reader access']);
 });
 
 test('unbound: with no SHELL binding every page is served exactly as built', async (t) => {

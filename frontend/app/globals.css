@@ -95,7 +95,7 @@ body {
 }
 
 /* The site path above the nameplate. site-shell styles its own content; this
-   only spaces the line from the nameplate. Empty on the front page when
+   only spaces it from the nameplate. Empty on the front page when
    site-shell does not run. */
 .masthead site-slot[name="site-path"]:not(:empty) {
   margin-bottom: var(--s3);

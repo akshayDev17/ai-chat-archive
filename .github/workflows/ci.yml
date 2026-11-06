@@ -99,7 +99,7 @@ jobs:
       # against the real site-shell, in local workerd (no account):
       # every page composed byte for byte, every page hydrating in headless
       # Chrome with no console error, an upgraded <site-theme-picker> and the
-      # composed site path switcher, and
+      # composed site row and trail, and
       # the fail-open cases (unbound, site-shell not running, site-shell
       # throwing). site-themes is public,
       # and its main branch is what deploys site-shell. `build`, not
