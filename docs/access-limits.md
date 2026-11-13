@@ -345,12 +345,13 @@ One rule: **public reads, private writes.**
 | Action | Identity required |
 |---|---|
 | read the edition (the front page) | no |
-| read one story by `share-id` | no |
+| read one public story by `share-id` | no |
+| read your own private story | yes |
 | file a share link | yes |
 | see your own filings | yes |
 
-Only the last two rows are gated, and since they are the `POST` and the
-owner-scoped `GET`, they cannot be delegated to Access — it has no method
+Only the last three rows are gated, and since they are the `POST` and the
+owner-scoped `GET`s, they cannot be delegated to Access — it has no method
 selector (§3). So they are enforced in `entry.py`, and Access's role is the
 narrower one: produce the email, and make the filing path unreachable to
 strangers.
@@ -379,8 +380,8 @@ because the Worker must mail the code.
 
 Either way, **provenance is our code and stays our code**: Access can gate a
 path, but it can never record who filed what. That is
-`conversations.owner_email` — internal, never published on a listing, and read
-only by the desk's "your recent filings" query.
+`conversations.owner_email` — internal, and never published on a listing. What
+it decides is in the README, under *Who can see what*.
 
 ## Sources
 

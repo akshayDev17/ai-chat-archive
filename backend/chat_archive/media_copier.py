@@ -121,7 +121,8 @@ async def retract_story(
     story = await repo.media_for(share_id, owner_email)
     if not await repo.delete(share_id, owner_email):
         return False
-    if await repo.get(share_id) is None:
+    # Any copy counts, private ones too: they show the same folder's images.
+    if not await repo.is_filed(share_id):
         await store.delete_prefix(prefix)
     old_keys = sorted({
         image["r2_key"] for image in (story or {}).get("images", [])

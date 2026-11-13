@@ -407,6 +407,106 @@ body {
   color: var(--warn);
 }
 
+/* Public or private, chosen at filing: two radios under the link, in the same
+   small mono as the form's hint. */
+.file-visibility {
+  border: 0;
+  margin-top: var(--s4);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s2) var(--s5);
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.file-visibility legend {
+  /* A legend is laid out on the fieldset's border, outside the flex row;
+     `float` puts it back in the row as its first item. */
+  float: left;
+  font-size: 0.625rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.file-form .file-choice {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  margin: 0;
+  font-size: inherit;
+  letter-spacing: 0;
+  text-transform: none;
+  cursor: pointer;
+}
+
+.file-choice input {
+  flex: none;
+  width: 0.9rem;
+  height: 0.9rem;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.file-choice strong {
+  font-weight: 500;
+  color: var(--ink);
+}
+
+/* What filing does when neither radio is picked: its own line under the two. */
+.file-unchosen {
+  flex-basis: 100%;
+}
+
+/* Your filings: one story a row, its controls on the line beneath the title. */
+.filings .kicker {
+  /* A heading for the outline, set like every other kicker. */
+  font-weight: 400;
+  margin-bottom: var(--s3);
+}
+
+.filing-list {
+  list-style: none;
+  border-top: 3px double var(--ink);
+}
+
+.filing-row {
+  padding: var(--s3) 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.filing-title {
+  font-family: var(--serif);
+  font-size: 1.05rem;
+  line-height: 1.35;
+  color: var(--ink);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+.filing-title:hover { color: var(--accent); }
+
+.filing-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--s2) var(--s4);
+  margin-top: var(--s2);
+}
+
+.filing-date {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+/* Delete sits at the row's far end, away from the switch beside it. Once it
+   is asking for confirmation it takes a line of its own. */
+.filing-tools > .retract { margin-left: auto; }
+.filing-tools > .retract-confirm { flex-basis: 100%; }
+
 /* ── typographic primitives ────────────────────────── */
 .kicker {
   font-family: var(--mono);
@@ -700,6 +800,9 @@ body {
   margin-left: auto;
   display: flex;
   align-items: baseline;
+  /* Stays against the right edge when it wraps — as it does once Delete is
+     asking for confirmation. */
+  justify-content: flex-end;
   flex-wrap: wrap;
   gap: var(--s2) var(--s4);
 }
@@ -825,11 +928,15 @@ body {
   margin-bottom: var(--s5);
 }
 
-/* Retract: the same quiet mono micro-caps as Sign out — it is an editor's
-   correction, not something the page should shout about. Only the confirming
-   click turns red. */
+/* A filer's controls on their own story — Delete (`.retract`), Make private or
+   public (`.tool`) and the Public/Private label: the same quiet mono micro-caps
+   as Sign out. They are an editor's corrections, not something the page should
+   shout about. Only the confirming click of a delete turns red. */
 .retract,
-.retract-confirm {
+.retract-confirm,
+.tool,
+.visibility-label,
+.visibility-control {
   font-family: var(--mono);
   font-size: 0.6875rem;
   letter-spacing: 0.1em;
@@ -837,7 +944,8 @@ body {
   color: var(--muted);
 }
 
-.retract {
+.retract,
+.tool {
   background: none;
   border: 0;
   padding: 0;
@@ -845,16 +953,55 @@ body {
   transition: color 0.12s ease;
 }
 
-.retract:hover { color: var(--accent); }
+/* An icon and its word on one line. The word sets the baseline, so the control
+   sits on the same line as the text around it; the icon is centred on the
+   word's capitals rather than on the line box, which would leave it low. */
+.retract,
+.visibility-label {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.4em;
+  white-space: nowrap;
+}
+
+.tool-icon {
+  flex: none;
+  width: 1.2em;
+  height: 1.2em;
+  align-self: center;
+  stroke-width: 1.75;
+}
+
+.retract:hover,
+.tool:hover { color: var(--accent); }
 .retract.danger { color: var(--danger); }
 .retract.danger:hover { color: var(--ink); }
-.retract:disabled { cursor: default; opacity: 0.6; }
+.retract:disabled,
+.tool:disabled { cursor: default; opacity: 0.6; }
 
-.retract-confirm {
+/* The switch reads as the action it is; the label beside it is the state. */
+.tool {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: var(--rule-2);
+}
+
+.visibility-private { color: var(--ink); }
+
+/* What a delete removes is a sentence to be read, not a label: set in the
+   same mono, but in sentence case. */
+.retract-ask {
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--ink);
+}
+
+.retract-confirm,
+.visibility-control {
   display: inline-flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: var(--s3);
+  gap: var(--s2) var(--s3);
 }
 
 .retract-error {
@@ -1563,6 +1710,12 @@ body {
   .back,
   .retract,
   .retract-confirm,
+  .tool,
+  .visibility-label,
+  .visibility-control,
+  .file-visibility,
+  .file-visibility legend,
+  .filing-date,
   .report th,
   .stamp,
   .sysnote,

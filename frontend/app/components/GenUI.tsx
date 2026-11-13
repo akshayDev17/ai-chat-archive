@@ -38,6 +38,7 @@ import {
   type GenNode,
 } from '@/lib/genui';
 import type { MediaItem, Source } from '@/types';
+import ArchiveImage from './ArchiveImage';
 import ScrollingTable from './ScrollingTable';
 
 /**
@@ -308,8 +309,7 @@ const BLOCKS: Record<string, BlockRenderer> = {
     const [image] = imagesFor(node, ctx);
     if (!image?.src) return null;
     return (
-      // eslint-disable-next-line @next/next/no-img-element -- static export, no image optimiser
-      <img
+      <ArchiveImage
         className="gx-image"
         src={mediaSrc(image.src)}
         alt={str(node.attrs.query) ?? ''}
@@ -335,8 +335,7 @@ const BLOCKS: Record<string, BlockRenderer> = {
         style={layout === 'carousel' ? ({ '--gx-ratio': ratio(node.attrs.aspectRatio) } as CSSProperties) : undefined}
       >
         {images.map((image, i) => (
-          // eslint-disable-next-line @next/next/no-img-element -- static export, no image optimiser
-          <img key={image.ordinal} src={mediaSrc(image.src!)} alt={queries[i] ?? ''} loading="lazy" />
+          <ArchiveImage key={image.ordinal} src={mediaSrc(image.src!)} alt={queries[i] ?? ''} loading="lazy" />
         ))}
       </div>
     );

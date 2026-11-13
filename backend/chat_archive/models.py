@@ -11,14 +11,23 @@ A parser never sets it — a public ChatGPT payload has no idea who is importing
 it. ``owner_email`` is stamped at ingest time by the composition root, the only
 layer that knows the authenticated identity. See :meth:`Conversation.owned_by`.
 
-Articles themselves are public once archived: anyone holding a share id can
-read the story at ``/chat-archives/<share-id>``. Ownership governs the
-*listing*, not the *reading*.
+Visibility
+----------
+Each archive is ``public`` or ``private``, and its filer chooses. A public one
+is in the edition and readable by anyone holding its share id, at
+``/chat-archives/<share-id>``. A private one is readable by its filer only: it
+is left out of the edition, its permalink answers 404 to everyone else, and so
+do its images.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
+
+
+PUBLIC = "public"
+PRIVATE = "private"
+VISIBILITIES = (PUBLIC, PRIVATE)
 
 
 @dataclass(frozen=True)
@@ -116,6 +125,10 @@ class Conversation:
     #: The reader whose archive holds this conversation. Empty until an
     #: authenticated ingest stamps it — see :meth:`owned_by`.
     owner_email: str = ""
+    #: ``public`` or ``private``. ``None`` on a conversation being filed means
+    #: the filer did not say: a new story is then public, and one filed again
+    #: keeps what it had. A stored conversation always has one of the two.
+    visibility: str | None = None
 
     def owned_by(self, email: str) -> "Conversation":
         """Return a copy of this conversation filed under ``email``.
@@ -130,6 +143,17 @@ class Conversation:
     def is_owned_by(self, email: str) -> bool:
         """Whether ``email`` owns this conversation."""
         return bool(self.owner_email) and self.owner_email == normalize_email(email)
+
+
+def checked_visibility(visibility: str) -> str:
+    """``visibility`` if it is one of the two, else a ``ValueError``.
+
+    Raised rather than defaulted: a typo that fell back to ``public`` would
+    publish a story its filer meant to keep.
+    """
+    if visibility not in VISIBILITIES:
+        raise ValueError("visibility must be 'public' or 'private'")
+    return visibility
 
 
 def normalize_email(email: str | None) -> str:

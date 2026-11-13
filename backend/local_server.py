@@ -11,9 +11,10 @@ D1 binding. Plain Python has neither, so this file adapts those seams:
 It reuses the exact same ports / service / parser / decoder / router semantics
 as the Worker, so what runs here is the real backend logic, just wired to local
 stand-ins. The public-read / private-filing split is enforced identically:
-``GET /api/sessions`` and ``GET /api/sessions/<id>`` are open to anyone, while
-``POST /api/desk/ingest``, ``GET /api/desk/filings`` and ``GET``/``DELETE
-/api/desk/sessions/<id>`` are 401 without an identity.
+``GET /api/sessions`` and ``GET /api/sessions/<id>`` are open to anyone (and
+show public stories only), while everything under ``/api/desk/`` — filing,
+your filings, a story's ``GET``/``PATCH``/``DELETE``, your own copy of a story
+and its images — is 401 without an identity.
 
 Identity, in precedence order:
 
@@ -45,6 +46,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+from dataclasses import replace
 import threading
 import time
 import urllib.request
@@ -59,10 +61,18 @@ from chat_archive.chatgpt.parser import ChatGptParser
 from chat_archive.local_media_store import DirectoryMediaStore
 from chat_archive.media_copier import copy_pending, retract_story
 from chat_archive.models import normalize_email
-from chat_archive.serializers import conversation_detail, media_counts
-from chat_archive.service import ShareService
+from chat_archive.serializers import conversation_detail, media_cache_control, media_counts
+from chat_archive.service import ShareService, requested_visibility
 from chat_archive.sqlite_repository import SqliteConversationRepository
-from chat_archive.urls import desk_media_target, first_param, media_key_of, query_of, safe_next
+from chat_archive.urls import (
+    DESK_IMAGE_ROUTE,
+    DESK_STORY_ROUTE,
+    desk_media_target,
+    first_param,
+    media_key_of,
+    query_of,
+    safe_next,
+)
 
 DEV_EMAIL = normalize_email(os.environ.get("DEV_EMAIL", ""))
 
@@ -82,7 +92,7 @@ ALLOWED_HEADERS = "content-type, x-archive-email"
 # passing. Same trap as the ``Access-Control-Allow-Origin: *`` bug: an HTTP
 # client that does not run the browser's CORS rules cannot prove a browser path
 # works. When a method is added to the Handler, add it here too.
-ALLOWED_METHODS = "GET,POST,DELETE,OPTIONS"
+ALLOWED_METHODS = "GET,POST,PATCH,DELETE,OPTIONS"
 
 
 class LocalResponse:
@@ -280,6 +290,26 @@ class Handler(BaseHTTPRequestHandler):
 
         self._json({"error": "not found"}, 404)
 
+    def do_PATCH(self):
+        """Make one of your own stories public or private. Mirrors the Worker."""
+        path = self.path.split("?", 1)[0].rstrip("/")
+        if not path.startswith("/api/desk/sessions/"):
+            return self._json({"error": "not found"}, 404)
+        email = self._identity()
+        if not email:
+            return self._json({"error": "sign-in required"}, 401)
+        body = self._read_body()
+        if body is None:
+            return self._json({"error": "invalid JSON"}, 400)
+        try:
+            visibility = requested_visibility(body, required=True)
+        except ValueError as exc:
+            return self._json({"error": str(exc)}, 400)
+        share_id = path.rsplit("/", 1)[-1]
+        if not asyncio.run(repo.set_visibility(share_id, email, visibility)):
+            return self._json({"error": "You have no filed story with that id"}, 404)
+        return self._json({"id": share_id, "visibility": visibility})
+
     def do_GET(self):
         path = self.path.split("?", 1)[0].rstrip("/")
 
@@ -320,7 +350,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/sessions":
             # Public: the edition is a newspaper, so the front page needs no
-            # identity. Owned by nobody in particular — every filer's copy.
+            # identity. Every filer's public stories; private ones are left out.
             return self._json({"sessions": asyncio.run(repo.list_all())})
 
         if path == "/api/desk/filings":
@@ -332,12 +362,25 @@ class Handler(BaseHTTPRequestHandler):
             )
 
         if path.startswith("/api/media/"):
-            # Public, like the story the image belongs to.
-            key = media_key_of(path)
-            found = asyncio.run(media_store.get(key)) if key else None
-            if found is None:
-                return self._json({"error": "not found"}, 404)
-            return self._bytes(*found)
+            # As public as the story the image belongs to — and no more.
+            return self._serve_media(media_key_of(path), None)
+
+        if path.startswith(DESK_IMAGE_ROUTE):
+            # The filer's own images: the only route a private story's have.
+            email = self._identity()
+            if not email:
+                return self._json({"error": "sign-in required"}, 401)
+            return self._serve_media(media_key_of(path, DESK_IMAGE_ROUTE), email)
+
+        if path.startswith(DESK_STORY_ROUTE):
+            # Your own copy of a story — the only way to read a private one.
+            email = self._identity()
+            if not email:
+                return self._json({"error": "sign-in required"}, 401)
+            conversation = asyncio.run(repo.get(path.rsplit("/", 1)[-1], email))
+            if conversation is None:
+                return self._json({"error": "You have no filed story with that id"}, 404)
+            return self._json(conversation_detail(conversation, for_owner=True))
 
         if desk_media_target(path) is not None:
             return self._desk_media(path, "GET")
@@ -353,12 +396,13 @@ class Handler(BaseHTTPRequestHandler):
                 {
                     "id": share_id,
                     "yours": story is not None,
+                    "visibility": story["visibility"] if story else None,
                     "images": media_counts(story["images"]) if story else None,
                 }
             )
 
         if path.startswith("/api/sessions/"):
-            # Public: a story is readable by permalink with no identity.
+            # Public: a public story is readable by permalink with no identity.
             share_id = path.rsplit("/", 1)[-1]
             conversation = asyncio.run(repo.get(share_id))
             if conversation is None:
@@ -389,8 +433,10 @@ class Handler(BaseHTTPRequestHandler):
 
         share_url = (body or {}).get("share_url", "")
         try:
+            visibility = requested_visibility(body)
             conversation = asyncio.run(service.ingest(share_url))
-            asyncio.run(repo.upsert(conversation.owned_by(email)))
+            asyncio.run(repo.upsert(replace(conversation.owned_by(email), visibility=visibility)))
+            filed = asyncio.run(repo.media_for(conversation.share_id, email))
             self._json(
                 {
                     "share_id": conversation.share_id,
@@ -400,15 +446,27 @@ class Handler(BaseHTTPRequestHandler):
                     "citations": len(conversation.citations),
                     "images": sum(len(m.media) for m in conversation.messages),
                     "owner": email,
+                    "visibility": filed["visibility"],
                 }
             )
         except Exception as exc:  # noqa: BLE001 - surface any ingest failure
             self._json({"error": str(exc)}, 400)
 
-    def _bytes(self, data: bytes, content_type: str):
+    def _serve_media(self, key: str | None, email: str | None):
+        """One copied image, to anyone (``email`` None) or to its filer.
+
+        Mirrors the Worker's `_serve_media`: the database is asked whether the
+        caller may see it before the store is.
+        """
+        if key is None or not asyncio.run(repo.media_key_readable(key, email)):
+            return self._json({"error": "not found"}, 404)
+        found = asyncio.run(media_store.get(key))
+        if found is None:
+            return self._json({"error": "not found"}, 404)
+        data, content_type = found
         self.send_response(200)
         self.send_header("Content-Type", content_type)
-        self.send_header("Cache-Control", "public, max-age=86400")
+        self.send_header("Cache-Control", media_cache_control(email))
         self._cors_headers()
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()

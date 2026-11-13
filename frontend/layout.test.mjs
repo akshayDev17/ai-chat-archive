@@ -68,6 +68,13 @@ const STORY_BODY = {
 
 const LISTED = { id: STORY, title: STORY_BODY.title, created_at: '2026-11-06T10:00:00+00:00', source: 'chatgpt', markdown: STORY_BODY.report };
 
+// The desk's list of your own filings: a long headline, and one of each kind,
+// so each row's controls (public or private, Delete) are laid out too.
+const FILINGS = [
+  { ...LISTED, visibility: 'public' },
+  { ...LISTED, id: '7bd988fa-d7a1-94fd-9405-72c1838cb6fc', title: 'A private story whose headline is long enough to wrap onto a second line on a phone', visibility: 'private' },
+];
+
 // Each page, and the text that shows it has rendered.
 const PAGES = {
   '/chat-archives': 'A story with wide content',
@@ -101,6 +108,7 @@ async function phone(width, height, colorScheme) {
     if (url.pathname === '/api/sessions') return route.fulfill({ json: { sessions: [LISTED] } });
     if (url.pathname === '/api/desk/whoami') return route.fulfill({ json: { email: 'reader@example.com' } });
     if (url.pathname === '/api/desk/media') return route.fulfill({ json: { filings: [] } });
+    if (url.pathname === '/api/desk/filings') return route.fulfill({ json: { sessions: FILINGS } });
     if (url.pathname.startsWith('/api/')) return route.fulfill({ status: 404, json: { error: 'not found' } });
     const file = join(out, exported(url.pathname));
     if (!existsSync(file)) return route.fulfill({ status: 404, body: '' });
@@ -119,6 +127,11 @@ for (const colorScheme of ['light', 'dark']) {
           await page.goto(`${ORIGIN}${path}`);
           await page.getByText(marker).first().waitFor({ timeout: 10_000 });
           await page.waitForLoadState('networkidle');
+          if (path === '/chat-archives/desk') {
+            // The widest the desk gets: a row asking to confirm a delete.
+            await page.getByRole('button', { name: /^Delete/ }).last().click();
+            await page.getByText('cannot be undone').waitFor();
+          }
           // A phone browser widens innerWidth to fit content wider than the
           // screen, so both are measured against the screen width.
           const { scrollWidth, innerWidth } = await page.evaluate(() => ({

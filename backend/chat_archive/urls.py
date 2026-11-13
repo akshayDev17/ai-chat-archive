@@ -69,10 +69,23 @@ _MEDIA_KEY_RE = re.compile(
 
 _DESK_MEDIA_RE = re.compile(r"/api/desk/media(?:/([^/]+)(?:/(retry|copy))?)?$")
 
+#: Where a public story's images are served to anyone.
+PUBLIC_MEDIA_ROUTE = "/api/media/"
 
-def media_key_of(path: str) -> str | None:
-    """The key in a public ``/api/media/<key>`` path, if it is a well-formed one."""
-    _, sep, key = path.partition("/api/media/")
+#: Where a filer's own images are served to them — the only route a private
+#: story's images have. Under ``/api/desk/``, so Cloudflare Access covers it.
+DESK_IMAGE_ROUTE = "/api/desk/image/"
+
+#: The filer's own copy of a story, private ones included.
+DESK_STORY_ROUTE = "/api/desk/stories/"
+
+
+def media_key_of(path: str, route: str = PUBLIC_MEDIA_ROUTE) -> str | None:
+    """The key in a ``<route><key>`` path, if it is a well-formed one.
+
+    ``route`` is :data:`PUBLIC_MEDIA_ROUTE` or :data:`DESK_IMAGE_ROUTE`.
+    """
+    _, sep, key = path.partition(route)
     return key if sep and _MEDIA_KEY_RE.match(key) else None
 
 

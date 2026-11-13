@@ -5,17 +5,18 @@ import { usePathname } from 'next/navigation';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
-import { filingStatus, getSession, type FilingStatus } from '@/lib/api';
+import { filingStatus, readStory, type FilingStatus } from '@/lib/api';
 import { imagesLabel, mediaHref } from '@/lib/media';
 import { linkifyCitations } from '@/lib/citations';
 import { hasGenUI, stripGenUI } from '@/lib/genui';
 import { splitMention, toChatItems } from '@/lib/chat';
 import { vendorLabel, vendorMark } from '@/lib/vendors';
-import type { SessionDetail, Source } from '@/types';
+import type { SessionDetail, Source, Visibility } from '@/types';
 import GenUIMessage from './GenUI';
 import Retract from './Retract';
 import ScrollingTable from './ScrollingTable';
 import SourcesPanel from './SourcesPanel';
+import VisibilityControl from './VisibilityControl';
 
 export type ReaderMode = 'report' | 'chat';
 
@@ -90,10 +91,14 @@ export default function SessionReader({
   const [session, setSession] = useState<SessionDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<ReaderMode>(initialMode);
-  // Whether the reader filed this story — and so may retract it and follow its
-  // image copies. Starts "not yours" and stays so for everyone else, so the
-  // controls never flash.
-  const [filing, setFiling] = useState<FilingStatus>({ yours: false, images: null });
+  // Whether the reader filed this story — and so may delete it, make it public
+  // or private, and follow its image copies. Starts "not yours" and stays so
+  // for everyone else, so the controls never flash.
+  const [filing, setFiling] = useState<FilingStatus>({
+    yours: false,
+    visibility: null,
+    images: null,
+  });
   // Which reply's sources drawer is open. One at a time — two drawers would
   // just stack, and the index is kept so the `···` that opened it can show it
   // is the active one.
@@ -102,11 +107,21 @@ export default function SessionReader({
   );
 
   useEffect(() => {
-    getSession(id)
+    readStory(id)
       .then(setSession)
       .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load session'));
     filingStatus(id).then(setFiling);
   }, [id]);
+
+  // The story is read again after its visibility changes, because where it is
+  // read from changes with it: a private story, and its images, are served to
+  // its filer on the signed-in routes only.
+  function visibilityChanged(visibility: Visibility) {
+    setFiling((current) => ({ ...current, visibility }));
+    readStory(id)
+      .then(setSession)
+      .catch(() => undefined);
+  }
 
   const report = useMemo(
     () => (session?.report ? linkifyCitations(session.report) : ''),
@@ -152,6 +167,13 @@ export default function SessionReader({
       <div className="reader-top">
         {filing.yours ? (
           <div className="reader-tools">
+            {filing.visibility ? (
+              <VisibilityControl
+                id={id}
+                visibility={filing.visibility}
+                onChanged={visibilityChanged}
+              />
+            ) : null}
             {filing.images ? (
               // A full navigation: the media page reads `?id` once, on load.
               <a href={mediaHref(id)} className="story-media">

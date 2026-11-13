@@ -212,6 +212,24 @@ class RetractTests(unittest.TestCase):
 
         self.assertIn("chat-archives/s1/msg-1/01.jpg", self.store.objects)
 
+    def test_the_folder_stays_while_another_filer_keeps_the_story_private(self):
+        """A private copy is invisible to the public lookup, and still uses the folder."""
+        asyncio.run(self.repo.upsert(story("s1", [img(1)])))
+        asyncio.run(self.repo.upsert(story("s1", [img(1)], owner="guest@example.com")))
+        asyncio.run(self.repo.set_visibility("s1", "guest@example.com", "private"))
+
+        asyncio.run(retract_story(self.repo, self.store, "s1", OWNER))
+
+        self.assertIn("chat-archives/s1/msg-1/01.jpg", self.store.objects)
+
+    def test_retracting_a_private_story_deletes_its_folder(self):
+        asyncio.run(self.repo.upsert(story("s1", [img(1)])))
+        asyncio.run(self.repo.set_visibility("s1", OWNER, "private"))
+
+        self.assertTrue(asyncio.run(retract_story(self.repo, self.store, "s1", OWNER)))
+
+        self.assertEqual(list(self.store.objects), ["chat-archives/s10/msg-1/01.jpg"])
+
     def test_retracting_also_frees_images_copied_before_per_story_folders(self):
         # A story copied into the old flat `img/` folder: its rows still name
         # those keys, and retracting the last copy deletes them too.

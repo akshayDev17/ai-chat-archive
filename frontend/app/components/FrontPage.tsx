@@ -10,8 +10,9 @@ const LEAD_SLOTS = 2; // two leads above the fold; the third heads the flow
 
 /**
  * The edition. Public, and the same for everyone: there is no signed-out branch
- * here any more, because there is nothing to hide — the front page is the
- * newspaper and every filed story appears in it.
+ * here, because the server sends this page public stories only — the front page
+ * is the newspaper, and a private story is not in it for anyone, its filer
+ * included.
  */
 export default function FrontPage() {
   const [sessions, setSessions] = useState<Session[]>([]);
