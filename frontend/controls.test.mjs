@@ -25,6 +25,9 @@ const THEIRS = '55555555-5555-4555-8555-555555555555';
 const FRESH = '77777777-7777-4777-8777-777777777777';
 const CONFIRM = 'Delete for good? This deletes the transcript, report, sources and images, and cannot be undone.';
 const NOT_YOURS = 'You have no filed story with that id';
+const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
+/** The storage key of a story's one image. */
+const imageKey = (id) => `chat-archives/${id}/msg-1/01.png`;
 
 /** The exported file the Worker serves for a path (worker.js, plus the assets' clean URLs). */
 function exported(pathname) {
@@ -36,26 +39,48 @@ function exported(pathname) {
 /**
  * A stand-in archive: `me` filed two stories (one private), someone else filed
  * a third. It answers as the backend does, including 404 for what is not the
- * caller's, and records every write it is sent.
+ * caller's, and records every write it is sent. Each story shows one image;
+ * the signed-in image route answers 401 to its first `imageFailures` requests,
+ * as a stray identity lookup does.
  */
-function archive({ signedIn = true, failDeletes = false } = {}) {
+function archive({ signedIn = true, failDeletes = false, imageFailures = 0 } = {}) {
   const stories = new Map([
     [TIDES, { title: 'Tides and harbours', visibility: 'public', mine: true }],
     [NOTE, { title: 'A private note', visibility: 'private', mine: true }],
     [THEIRS, { title: 'Someone else’s story', visibility: 'public', mine: false }],
   ]);
   const writes = [];
-  const detail = (id, story) => ({
+  const imageRequests = [];
+  const detail = (id, story, forOwner) => ({
     id,
     title: story.title,
     source: 'chatgpt',
     report: `# ${story.title}\n\nThe report of ${story.title}.`,
     citations: [],
-    messages: [],
+    messages: [
+      { role: 'user', content: 'Show me the harbour.', sources: [], media: [] },
+      {
+        role: 'assistant',
+        content: '<AsyncImage query="the harbour" aspectRatio="16:9"/>',
+        sources: [],
+        media: [{ tag_start: 0, ordinal: 0, src: `${forOwner ? '/api/desk/image/' : '/api/media/'}${imageKey(id)}` }],
+      },
+    ],
   });
   const listed = (id, story) => ({ id, title: story.title, created_at: '2026-11-06T10:00:00+00:00', source: 'chatgpt', markdown: null });
 
-  function answer(method, pathname, body) {
+  function answer(method, pathname, body, search) {
+    const image = /^\/api\/(media|desk\/image)\/chat-archives\/([^/]+)\//.exec(pathname);
+    if (image) {
+      imageRequests.push(`${pathname}${search}`);
+      const shown = stories.get(image[2]);
+      const png = { body: PNG, contentType: 'image/png' };
+      if (image[1] === 'media') return shown?.visibility === 'public' ? png : { status: 404, json: { error: 'not found' } };
+      if (!signedIn || imageRequests.filter((asked) => asked.startsWith('/api/desk/image/')).length <= imageFailures) {
+        return { status: 401, json: { error: 'sign-in required' } };
+      }
+      return shown?.mine ? png : { status: 404, json: { error: 'not found' } };
+    }
     const id = pathname.split('/').pop();
     const story = stories.get(id);
     const mine = signedIn && story?.mine ? story : null;
@@ -63,11 +88,16 @@ function archive({ signedIn = true, failDeletes = false } = {}) {
       return { json: { sessions: [...stories].filter(([, s]) => s.visibility === 'public').map(([i, s]) => listed(i, s)) } };
     }
     if (pathname.startsWith('/api/sessions/')) {
-      return story?.visibility === 'public' ? { json: detail(id, story) } : { status: 404, json: { error: 'Not found' } };
+      return story?.visibility === 'public' ? { json: detail(id, story, false) } : { status: 404, json: { error: 'Not found' } };
     }
     if (!signedIn) return { status: 401, json: { error: 'sign-in required' } };
     if (pathname === '/api/desk/whoami') return { json: { email: 'me@example.com' } };
     if (pathname === '/api/desk/media') return { json: { filings: [] } };
+    if (pathname.startsWith('/api/desk/media/')) {
+      if (!mine) return { status: 404, json: { error: NOT_YOURS } };
+      const copied = { id: 'image-1', message_seq: 1, tag_start: 0, ordinal: 0, content_url: '', origin_url: '', status: 'copied', attempts: 1, last_error: null, r2_key: imageKey(id), object_path: null };
+      return { json: { id, title: mine.title, visibility: mine.visibility, images: [copied] } };
+    }
     if (pathname === '/api/desk/filings') {
       return { json: { owner: 'me@example.com', sessions: [...stories].filter(([, s]) => s.mine).map(([i, s]) => ({ ...listed(i, s), visibility: s.visibility })) } };
     }
@@ -82,7 +112,7 @@ function archive({ signedIn = true, failDeletes = false } = {}) {
       return { json: { share_id: filedId, title: stories.get(filedId).title, messages: 2, report_length: 10, citations: 0, images: 0, visibility } };
     }
     if (pathname.startsWith('/api/desk/stories/')) {
-      return mine ? { json: detail(id, mine) } : { status: 404, json: { error: NOT_YOURS } };
+      return mine ? { json: detail(id, mine, true) } : { status: 404, json: { error: NOT_YOURS } };
     }
     if (pathname.startsWith('/api/desk/sessions/')) {
       if (method === 'GET') return { json: { id, yours: Boolean(mine), visibility: mine?.visibility ?? null, images: null } };
@@ -99,7 +129,7 @@ function archive({ signedIn = true, failDeletes = false } = {}) {
     }
     return { status: 404, json: { error: 'not found' } };
   }
-  return { answer, writes, stories };
+  return { answer, writes, stories, imageRequests };
 }
 
 let browser;
@@ -119,7 +149,7 @@ async function open(t, path, options) {
     const url = new URL(request.url());
     if (url.origin !== ORIGIN) return route.abort();
     if (url.pathname.startsWith('/api/')) {
-      return route.fulfill({ status: 200, ...api.answer(request.method(), url.pathname, request.postDataJSON()) });
+      return route.fulfill({ status: 200, ...api.answer(request.method(), url.pathname, request.postDataJSON(), url.search) });
     }
     const file = join(out, exported(url.pathname));
     if (!existsSync(file)) return route.fulfill({ status: 404, body: '' });
@@ -341,4 +371,69 @@ test('a private story is not found for a signed-out visitor', async (t) => {
   await page.getByText('Not found').waitFor();
   assert.equal(await page.getByText('A private note').count(), 0);
   assert.equal(await page.getByRole('button').count(), 0);
+});
+
+/** Whether the image has loaded and has a picture to show. */
+const drawn = (img) => img.evaluate((el) => el.complete && el.naturalWidth > 0);
+
+/** Wait until the archive has been asked for `count` images, then let any further ask arrive. */
+async function imagesAsked(page, api, count) {
+  for (let waited = 0; api.imageRequests.length < count && waited < 5000; waited += 25) await page.waitForTimeout(25);
+  await page.waitForTimeout(400);
+}
+
+test('the media page reads a public story’s image from the public route', async (t) => {
+  const { page, api } = await open(t, `/chat-archives/desk/media?id=${TIDES}`, { imageFailures: Infinity });
+  const img = page.locator('.media-tile img');
+  await img.waitFor();
+  await imagesAsked(page, api, 1);
+  assert.deepEqual(api.imageRequests, [`/api/media/${imageKey(TIDES)}`]);
+  assert.equal(await drawn(img), true);
+});
+
+test('the media page reads a private story’s image from the signed-in route', async (t) => {
+  const { page, api } = await open(t, `/chat-archives/desk/media?id=${NOTE}`);
+  const img = page.locator('.media-tile img');
+  await img.waitFor();
+  await imagesAsked(page, api, 1);
+  assert.deepEqual(api.imageRequests, [`/api/desk/image/${imageKey(NOTE)}`]);
+  assert.equal(await drawn(img), true);
+});
+
+test('a signed-in image that fails once is asked for again and shown', async (t) => {
+  const { page, api } = await open(t, `/chat-archives/desk/media?id=${NOTE}`, { imageFailures: 1 });
+  const img = page.locator('.media-tile img');
+  await img.waitFor();
+  await imagesAsked(page, api, 2);
+  assert.deepEqual(api.imageRequests, [`/api/desk/image/${imageKey(NOTE)}`, `/api/desk/image/${imageKey(NOTE)}?retry=1`]);
+  assert.equal(await drawn(img), true);
+});
+
+test('a signed-in image that keeps failing is asked for twice and left broken', async (t) => {
+  const { page, api } = await open(t, `/chat-archives/desk/media?id=${NOTE}`, { imageFailures: Infinity });
+  const img = page.locator('.media-tile img');
+  await img.waitFor();
+  await imagesAsked(page, api, 2);
+  assert.deepEqual(api.imageRequests, [`/api/desk/image/${imageKey(NOTE)}`, `/api/desk/image/${imageKey(NOTE)}?retry=1`]);
+  assert.equal(await drawn(img), false);
+});
+
+test('your private story’s picture in the transcript is asked for again when it fails once', async (t) => {
+  const { page, api } = await open(t, `/chat-archives/${NOTE}?chat`, { imageFailures: 1 });
+  const img = page.getByRole('img', { name: 'the harbour' });
+  await img.waitFor({ state: 'attached' });
+  await img.scrollIntoViewIfNeeded();
+  await imagesAsked(page, api, 2);
+  assert.deepEqual(api.imageRequests, [`/api/desk/image/${imageKey(NOTE)}`, `/api/desk/image/${imageKey(NOTE)}?retry=1`]);
+  assert.equal(await drawn(img), true);
+});
+
+test('a public story’s picture in the transcript comes from the public route and is not asked for twice', async (t) => {
+  const { page, api } = await open(t, `/chat-archives/${TIDES}?chat`);
+  const img = page.getByRole('img', { name: 'the harbour' });
+  await img.waitFor({ state: 'attached' });
+  await img.scrollIntoViewIfNeeded();
+  await imagesAsked(page, api, 1);
+  assert.deepEqual(api.imageRequests, [`/api/media/${imageKey(TIDES)}`]);
+  assert.equal(await drawn(img), true);
 });

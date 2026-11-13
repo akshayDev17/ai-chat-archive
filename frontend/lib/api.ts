@@ -134,13 +134,26 @@ export function mediaSrc(src: string): string {
 }
 
 /**
- * One of your own copied images, by its storage key.
+ * One of your own copied images on the media page, by its storage key.
  *
- * The signed-in route, not the public `/api/media/`: a private story's images
- * are served nowhere else, and the media page shows only your own.
+ * A public story's comes from the public route, which asks for no identity. A
+ * private story's comes from the signed-in route: it is served nowhere else.
  */
-export function ownImageSrc(key: string): string {
-  return `${API_BASE}/api/desk/image/${key}`;
+export function copiedImageSrc(key: string, visibility: Visibility): string {
+  return mediaSrc(`${visibility === 'private' ? '/api/desk/image/' : '/api/media/'}${key}`);
+}
+
+/**
+ * Where an image that failed to load is asked for once more, or `null` when it
+ * is not asked for again.
+ *
+ * Only the signed-in route gets the second ask: it can 401 a signed-in reader
+ * on a stray identity lookup, and an `<img>` has no `fetchRetryingSignIn`. The
+ * query makes it a new address, so the browser asks rather than reusing the
+ * failure; the Worker reads the key from the path and ignores it.
+ */
+export function imageRetrySrc(src: string): string | null {
+  return src.includes('/api/desk/image/') ? `${src}?retry=1` : null;
 }
 
 /** A single public story, by permalink: no sign-in required. */

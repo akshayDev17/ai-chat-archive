@@ -14,9 +14,10 @@ import test from 'node:test';
 import {
   ApiError,
   SIGN_IN_RETRY_DELAY_MS,
+  copiedImageSrc,
+  imageRetrySrc,
   ingestSession,
   isSignInRequired,
-  ownImageSrc,
   readStory,
   retractSession,
   setVisibility,
@@ -137,9 +138,18 @@ test('filing without a choice says nothing about visibility', async () => {
   assert.equal(result.visibility, 'private');
 });
 
-test('your own images are asked for on the signed-in route', () => {
-  assert.equal(
-    new URL(ownImageSrc('chat-archives/abc/msg-1/01.jpg')).pathname,
-    '/api/desk/image/chat-archives/abc/msg-1/01.jpg',
-  );
+test('the media page reads a public story’s image from the public route, a private one’s from the signed-in route', () => {
+  const key = 'chat-archives/abc/msg-1/01.jpg';
+  assert.equal(new URL(copiedImageSrc(key, 'public')).pathname, `/api/media/${key}`);
+  assert.equal(new URL(copiedImageSrc(key, 'private')).pathname, `/api/desk/image/${key}`);
+});
+
+test('only a signed-in image is asked for again, at a new address for the same key', () => {
+  const src = copiedImageSrc('chat-archives/abc/msg-1/01.jpg', 'private');
+  const again = imageRetrySrc(src);
+  assert.ok(again);
+  assert.notEqual(again, src);
+  assert.equal(new URL(again).pathname, new URL(src).pathname);
+  assert.equal(imageRetrySrc(copiedImageSrc('chat-archives/abc/msg-1/01.jpg', 'public')), null);
+  assert.equal(imageRetrySrc('/api/media/chat-archives/abc/msg-1/01.jpg'), null);
 });

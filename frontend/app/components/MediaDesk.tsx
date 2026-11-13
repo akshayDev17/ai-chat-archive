@@ -2,15 +2,16 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import {
+  copiedImageSrc,
   copyMediaNow,
   isSignInRequired,
   mediaFor,
   mediaSummary,
-  ownImageSrc,
   retryMedia,
   whoami,
 } from '@/lib/api';
-import type { MediaFiling, MediaImage, MediaStory } from '@/types';
+import type { MediaFiling, MediaImage, MediaStory, Visibility } from '@/types';
+import ArchiveImage from './ArchiveImage';
 import { VisibilityLabel } from './VisibilityControl';
 
 const HERE = '/chat-archives/desk/media';
@@ -236,7 +237,7 @@ function StoryMedia({ id }: { id: string }) {
 
           <ul className="media-grid">
             {images.map((image) => (
-              <MediaTile key={image.id} image={image} />
+              <MediaTile key={image.id} image={image} visibility={story.visibility} />
             ))}
           </ul>
         </>
@@ -245,12 +246,11 @@ function StoryMedia({ id }: { id: string }) {
   );
 }
 
-function MediaTile({ image }: { image: MediaImage }) {
+function MediaTile({ image, visibility }: { image: MediaImage; visibility: Visibility }) {
   return (
     <li className={`media-tile media-${image.status}`}>
       {image.status === 'copied' && image.r2_key ? (
-        // eslint-disable-next-line @next/next/no-img-element -- static export, no image optimiser
-        <img src={ownImageSrc(image.r2_key)} alt="" loading="lazy" />
+        <ArchiveImage src={copiedImageSrc(image.r2_key, visibility)} alt="" loading="lazy" />
       ) : (
         <div className="media-placeholder">{image.status === 'failed' ? '!' : '…'}</div>
       )}
