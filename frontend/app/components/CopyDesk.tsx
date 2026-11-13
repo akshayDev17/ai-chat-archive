@@ -91,10 +91,14 @@ export default function CopyDesk() {
 
 /** What the form last did, shown in its status line. */
 interface Note {
+  /** The whole line — or, when it announces a story, what follows who can read it. */
   text: string;
   tone: 'ok' | 'warn' | 'error';
-  /** The story this note announces, so it can be deleted from here. */
-  filed?: { id: string; title: string };
+  /**
+   * The story this note announces, so it can be deleted from here. The line
+   * says who can read it from `visibility` as it is now, not as it was filed.
+   */
+  filed?: { id: string; title: string; visibility: Visibility };
   /** Images in it, queued for copying — linked to their progress. */
   images?: number;
 }
@@ -139,6 +143,9 @@ function DeskWork() {
 
   function changeVisibility(id: string, visibility: Visibility) {
     setFilings((rows) => rows?.map((row) => (row.id === id ? { ...row, visibility } : row)) ?? rows);
+    setNote((current) =>
+      current?.filed?.id === id ? { ...current, filed: { ...current.filed, visibility } } : current,
+    );
   }
 
   return (
@@ -181,10 +188,8 @@ function FileSession({
       const result = await ingestSession(url, visibility);
       setUrl('');
       setVisibility(undefined);
-      const where =
-        result.visibility === 'private' ? 'is filed as private — only you can read it' : 'is in the edition';
       onNote({
-        filed: { id: result.share_id, title: result.title },
+        filed: { id: result.share_id, title: result.title, visibility: result.visibility },
         images: result.images,
         // A filed session with no report is not a failure — the transcript is
         // there and the story is filed — but it is not what was asked for
@@ -193,8 +198,8 @@ function FileSession({
         tone: result.report_length > 0 ? 'ok' : 'warn',
         text:
           result.report_length > 0
-            ? `“${result.title}” ${where} — ${result.messages} messages, ${result.citations} citations.`
-            : `“${result.title}” ${where}, but no summary report was found in that share — it will read as a transcript only.`,
+            ? ` — ${result.messages} messages, ${result.citations} citations.`
+            : ', but no summary report was found in that share — it will read as a transcript only.',
       });
       onFiled();
       // Tells the front page (another tab included) to re-read the edition.
@@ -268,6 +273,13 @@ function FileSession({
       >
         {note ? (
           <>
+            {filed
+              ? `“${filed.title}” ${
+                  filed.visibility === 'private'
+                    ? 'is filed as private — only you can read it'
+                    : 'is in the edition'
+                }`
+              : null}
             {note.text}
             {note.images ? (
               <>

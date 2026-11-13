@@ -269,6 +269,28 @@ test('a choice made for one filing is not carried to the next on the same page',
   assert.equal((await row(page, 'A private note').locator('.visibility-label').innerText()).toLowerCase(), 'private');
 });
 
+test('the filing line follows the story when its row is switched', async (t) => {
+  const { page, api } = await open(t, '/chat-archives/desk');
+  const line = page.locator('.file-msg');
+  await page.getByRole('radio', { name: /^Private/ }).check();
+  await fileLink(page, FRESH, '“A new story” is filed as private — only you can read it — 2 messages, 0 citations.');
+
+  const fresh = row(page, 'A new story');
+  await fresh.getByRole('button', { name: 'Make public: A new story' }).click();
+  await line.filter({ hasText: '“A new story” is in the edition — 2 messages, 0 citations.' }).waitFor();
+  assert.doesNotMatch(await line.innerText(), /only you can read it/);
+  assert.equal(api.stories.get(FRESH).visibility, 'public');
+  await line.getByRole('button', { name: 'Delete it' }).waitFor();
+
+  await fresh.getByRole('button', { name: 'Make private: A new story' }).click();
+  await line.filter({ hasText: '“A new story” is filed as private — only you can read it — 2 messages, 0 citations.' }).waitFor();
+
+  // Another story's switch leaves the line alone.
+  await row(page, 'Tides and harbours').getByRole('button', { name: 'Make private: Tides and harbours' }).click();
+  await row(page, 'Tides and harbours').getByRole('button', { name: 'Make public: Tides and harbours' }).waitFor();
+  assert.match(await line.innerText(), /^“A new story” is filed as private — only you can read it — 2 messages, 0 citations\./);
+});
+
 test('a private story filed again with Public chosen is published', async (t) => {
   const { page, api } = await open(t, '/chat-archives/desk');
   await page.getByRole('radio', { name: /^Public/ }).check();
