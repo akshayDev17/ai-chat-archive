@@ -380,8 +380,8 @@ because the Worker must mail the code.
 
 Either way, **provenance is our code and stays our code**: Access can gate a
 path, but it can never record who filed what. That is
-`conversations.owner_email` — internal, never published on a listing, and read
-only by the desk's "your recent filings" query.
+`conversations.owner_email` — internal, and never published on a listing. What
+it decides is in the README, under *Who can see what*.
 
 ## Sources
 

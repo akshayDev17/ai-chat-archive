@@ -103,9 +103,9 @@ class ConversationRepository(ABC):
     async def delete(self, share_id: str, owner_email: str) -> bool:
         """Retract one reader's copy of a story, with its messages, report and sources.
 
-        The one place ownership *is* an access boundary: you can only take back
-        what you filed. Another filer's copy of the same share link stays in the
-        edition. Returns False when this reader has no copy to retract, and
+        Ownership *is* an access boundary here: you can only take back what you
+        filed. Another filer's copy of the same share link stays as it was.
+        Returns False when this reader has no copy to retract, and
         raises on an empty owner rather than deleting unscoped.
         """
 

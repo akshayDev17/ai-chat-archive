@@ -387,7 +387,9 @@ repository, as it gives access to deploy Workers on your account."
   phone, the page's trail on its own line under it), then the phone layout test
   on that export (`npm run test:layout`: every page, a story with bare URLs and
   wide tables included, lays out at exactly the screen width in Chrome's phone
-  emulation, upright and sideways).
+  emulation, upright and sideways) and, on the same export, the filer's
+  controls test (`npm run test:controls`: Delete and public or private, on the
+  desk and on the story page, in Chrome).
 - **`deploy-api`** — `main` only, after `test` passes: a check, through
   the Cloudflare API, that the most specific self-hosted Access application
   covering `/api/desk/whoami` has an Allow policy and no Bypass policy (no

@@ -58,6 +58,9 @@ One rule: **public reads, private writes.**
 | File a share link | **Yes** | The only action that spends money and storage. |
 | See your own filings | **Yes** | Provenance, not a boundary — it answers "what did I file?". |
 
+This is the rule as first decided. A filer can since delete a story or keep it
+private; the README's *Who can see what* is the current rule.
+
 Ownership is *provenance*, not an access boundary, and it **never leaves the
 server on a read**: `conversations.owner_email` keys the upsert, scopes the
 desk's "your recent filings" query, and is returned by exactly one endpoint

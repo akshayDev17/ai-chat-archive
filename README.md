@@ -18,10 +18,10 @@ read.
 
 ### The copy desk — `/chat-archives/desk`
 
-Where a share link becomes a story. Reached by signing in, and gated: the
-filing endpoint is the only write in the product. One job, one page — the form,
-and nothing else. It is also the one place your address is shown back to you,
-on a page that requires signing in.
+Where a share link becomes a story. Reached by signing in, and gated. The
+filing form, and under it your own filings with their controls (see
+[Who can see what](#who-can-see-what)). It is also the one place your address is
+shown back to you, on a page that requires signing in.
 
 ![The copy desk](docs/screenshots/08-copy-desk.png)
 

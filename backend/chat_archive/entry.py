@@ -303,7 +303,7 @@ class Default(WorkerEntrypoint):
         return _json(conversation_detail(conversation, for_owner=True))
 
     async def _retract(self, share_id: str, identity) -> Response:
-        """Take one of your own stories out of the edition.
+        """Delete one of your own stories, public or private.
 
         Scoped to the caller's copy: someone else's copy of the same share link
         is untouched, and a story you never filed is a 404 rather than a 403 —
