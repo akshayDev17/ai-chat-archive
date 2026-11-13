@@ -86,8 +86,6 @@ export interface SessionDetail {
   report: string | null;
   citations: Citation[];
   messages: Message[];
-  /** Present only when the filer reads their own copy through the desk. */
-  visibility?: Visibility;
 }
 
 export interface IngestResult {

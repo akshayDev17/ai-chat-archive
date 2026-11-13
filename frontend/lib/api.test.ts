@@ -88,10 +88,10 @@ test('a story is read from the public permalink when it is public', async () => 
 test('a story absent from the public permalink is read as your own copy', async () => {
   const calls = scriptFetch(
     json({ error: 'Not found' }, 404),
-    json({ id: 'abc', title: 'Mine alone', visibility: 'private' }),
+    json({ id: 'abc', title: 'Mine alone' }),
   );
   const story = await readStory('abc');
-  assert.equal(story.visibility, 'private');
+  assert.equal(story.title, 'Mine alone');
   assert.deepEqual(
     calls.map((c) => new URL(c.url).pathname),
     ['/api/sessions/abc', '/api/desk/stories/abc'],
@@ -126,6 +126,15 @@ test('filing says whether the story is public or private', async () => {
     share_url: 'https://chatgpt.com/share/abc',
     visibility: 'private',
   });
+});
+
+test('filing without a choice says nothing about visibility', async () => {
+  const calls = scriptFetch(json({ share_id: 'abc', visibility: 'private' }));
+  const result = await ingestSession('https://chatgpt.com/share/abc');
+  assert.deepEqual(JSON.parse(String(calls[0].init?.body)), {
+    share_url: 'https://chatgpt.com/share/abc',
+  });
+  assert.equal(result.visibility, 'private');
 });
 
 test('your own images are asked for on the signed-in route', () => {

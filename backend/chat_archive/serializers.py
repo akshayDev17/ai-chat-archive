@@ -76,18 +76,11 @@ def _message(message: Message, media_route: str) -> dict:
 def conversation_detail(conversation: Conversation, for_owner: bool = False) -> dict:
     """The full payload the reader view needs: report + transcript + citations.
 
-    ``for_owner`` is the filer reading their own copy through the desk: the
-    payload then says whether it is public or private, and its images point at
-    the filer's own image route — the only one that serves a private story's.
+    ``for_owner`` is the filer reading their own copy through the desk: its
+    images then point at the filer's own image route — the only one that serves
+    a private story's.
     """
     media_route = DESK_IMAGE_ROUTE if for_owner else PUBLIC_MEDIA_ROUTE
-    detail = _detail(conversation, media_route)
-    if for_owner:
-        detail["visibility"] = conversation.visibility
-    return detail
-
-
-def _detail(conversation: Conversation, media_route: str) -> dict:
     return {
         "id": conversation.share_id,
         "title": conversation.title,

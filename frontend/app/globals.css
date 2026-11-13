@@ -455,6 +455,11 @@ body {
   color: var(--ink);
 }
 
+/* What filing does when neither radio is picked: its own line under the two. */
+.file-unchosen {
+  flex-basis: 100%;
+}
+
 /* Your filings: one story a row, its controls on the line beneath the title. */
 .filings .kicker {
   /* A heading for the outline, set like every other kicker. */

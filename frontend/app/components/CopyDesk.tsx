@@ -167,7 +167,9 @@ function FileSession({
   onDeleted: (id: string, title: string) => void;
 }) {
   const [url, setUrl] = useState('');
-  const [visibility, setVisibility] = useState<Visibility>('public');
+  // Unset until the filer picks one, and sent only then: filing a link again
+  // must not change who can read it unless they say so here.
+  const [visibility, setVisibility] = useState<Visibility>();
   const [busy, setBusy] = useState(false);
   const filed = note?.filed;
 
@@ -255,6 +257,9 @@ function FileSession({
             </span>
           </label>
         ))}
+        <span className="file-unchosen">
+          Neither chosen: a new story is public, and one filed again keeps what it had.
+        </span>
       </fieldset>
       <p
         className={note && note.tone !== 'ok' ? `file-msg ${note.tone}` : 'file-msg'}

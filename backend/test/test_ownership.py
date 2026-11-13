@@ -43,6 +43,24 @@ GUEST = "guest@example.com"
 # --------------------------------------------------------------------- fake D1
 
 
+class _JsNull:
+    """What D1 hands back for "no row": JavaScript ``null``.
+
+    In the Worker that reaches Python as ``pyodide.ffi.jsnull``, which is falsy
+    but is not ``None``. The fake answers the same way, so a repository that
+    tests a missing row with ``is None`` fails here as it would in production.
+    """
+
+    def __bool__(self) -> bool:
+        return False
+
+    def __repr__(self) -> str:
+        return "jsnull"
+
+
+JSNULL = _JsNull()
+
+
 class _FakeD1Statement:
     """The slice of the D1 prepared-statement API the repository actually uses."""
 
@@ -61,7 +79,7 @@ class _FakeD1Statement:
 
     async def first(self):
         row = self._conn.execute(self._sql, self._params).fetchone()
-        return dict(row) if row is not None else None
+        return dict(row) if row is not None else JSNULL
 
     async def all(self):
         rows = self._conn.execute(self._sql, self._params).fetchall()

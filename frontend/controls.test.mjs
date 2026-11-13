@@ -22,6 +22,7 @@ const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/cs
 const TIDES = '11111111-1111-4111-8111-111111111111';
 const NOTE = '22222222-2222-4222-8222-222222222222';
 const THEIRS = '55555555-5555-4555-8555-555555555555';
+const FRESH = '77777777-7777-4777-8777-777777777777';
 const CONFIRM = 'Delete for good? This deletes the transcript, report, sources and images, and cannot be undone.';
 const NOT_YOURS = 'You have no filed story with that id';
 
@@ -44,14 +45,13 @@ function archive({ signedIn = true, failDeletes = false } = {}) {
     [THEIRS, { title: 'Someone else’s story', visibility: 'public', mine: false }],
   ]);
   const writes = [];
-  const detail = (id, story, forOwner) => ({
+  const detail = (id, story) => ({
     id,
     title: story.title,
     source: 'chatgpt',
     report: `# ${story.title}\n\nThe report of ${story.title}.`,
     citations: [],
     messages: [],
-    ...(forOwner ? { visibility: story.visibility } : {}),
   });
   const listed = (id, story) => ({ id, title: story.title, created_at: '2026-11-06T10:00:00+00:00', source: 'chatgpt', markdown: null });
 
@@ -63,7 +63,7 @@ function archive({ signedIn = true, failDeletes = false } = {}) {
       return { json: { sessions: [...stories].filter(([, s]) => s.visibility === 'public').map(([i, s]) => listed(i, s)) } };
     }
     if (pathname.startsWith('/api/sessions/')) {
-      return story?.visibility === 'public' ? { json: detail(id, story, false) } : { status: 404, json: { error: 'Not found' } };
+      return story?.visibility === 'public' ? { json: detail(id, story) } : { status: 404, json: { error: 'Not found' } };
     }
     if (!signedIn) return { status: 401, json: { error: 'sign-in required' } };
     if (pathname === '/api/desk/whoami') return { json: { email: 'me@example.com' } };
@@ -71,8 +71,18 @@ function archive({ signedIn = true, failDeletes = false } = {}) {
     if (pathname === '/api/desk/filings') {
       return { json: { owner: 'me@example.com', sessions: [...stories].filter(([, s]) => s.mine).map(([i, s]) => ({ ...listed(i, s), visibility: s.visibility })) } };
     }
+    if (pathname === '/api/desk/ingest') {
+      // As the backend files: a choice is stored, and without one a new story
+      // is public while one filed again keeps what it had.
+      const filedId = body.share_url.split('/').pop();
+      const before = stories.get(filedId);
+      writes.push({ method, id: filedId, body });
+      const visibility = body.visibility ?? (before?.mine ? before.visibility : 'public');
+      stories.set(filedId, { title: before?.title ?? 'A new story', visibility, mine: true });
+      return { json: { share_id: filedId, title: stories.get(filedId).title, messages: 2, report_length: 10, citations: 0, images: 0, visibility } };
+    }
     if (pathname.startsWith('/api/desk/stories/')) {
-      return mine ? { json: detail(id, mine, true) } : { status: 404, json: { error: NOT_YOURS } };
+      return mine ? { json: detail(id, mine) } : { status: 404, json: { error: NOT_YOURS } };
     }
     if (pathname.startsWith('/api/desk/sessions/')) {
       if (method === 'GET') return { json: { id, yours: Boolean(mine), visibility: mine?.visibility ?? null, images: null } };
@@ -200,12 +210,55 @@ test('a row says Public or Private and switches, once the server confirms', asyn
   assert.deepEqual(api.writes, [{ method: 'PATCH', id: TIDES, body: { visibility: 'private' } }]);
 });
 
-test('the filing form offers public or private, public by default', async (t) => {
-  const { page } = await open(t, '/chat-archives/desk');
+/** Paste a share link into the filing form, file it, and wait for the result line. */
+async function fileLink(page, id, said) {
+  await page.getByLabel('ChatGPT share link').fill(`https://chatgpt.com/share/${id}`);
+  await page.getByRole('button', { name: 'File it' }).click();
+  await page.locator('.file-msg').filter({ hasText: said }).waitFor();
+}
+
+test('the filing form offers public or private and picks neither, so a new story is filed public', async (t) => {
+  const { page, api } = await open(t, '/chat-archives/desk');
   const choices = page.getByRole('group', { name: 'Who can read it' });
   await choices.waitFor();
-  assert.equal(await choices.getByRole('radio', { name: /^Public/ }).isChecked(), true);
+  assert.equal(await choices.getByRole('radio', { name: /^Public/ }).isChecked(), false);
   assert.equal(await choices.getByRole('radio', { name: /^Private/ }).isChecked(), false);
+  await choices.getByText('Neither chosen: a new story is public, and one filed again keeps what it had.').waitFor();
+
+  await fileLink(page, FRESH, 'is in the edition');
+  assert.deepEqual(api.writes, [{ method: 'POST', id: FRESH, body: { share_url: `https://chatgpt.com/share/${FRESH}` } }]);
+  assert.equal((await row(page, 'A new story').locator('.visibility-label').innerText()).toLowerCase(), 'public');
+});
+
+test('a story filed private and filed again without choosing stays private', async (t) => {
+  const { page, api } = await open(t, '/chat-archives/desk');
+  const share_url = `https://chatgpt.com/share/${FRESH}`;
+  await page.getByRole('radio', { name: /^Private/ }).check();
+  await fileLink(page, FRESH, 'is filed as private — only you can read it');
+
+  // Later, on a desk opened afresh: the same link, the choice left alone.
+  await page.reload();
+  await fileLink(page, FRESH, 'is filed as private — only you can read it');
+  assert.deepEqual(api.writes, [
+    { method: 'POST', id: FRESH, body: { share_url, visibility: 'private' } },
+    { method: 'POST', id: FRESH, body: { share_url } },
+  ]);
+  assert.equal(api.stories.get(FRESH).visibility, 'private');
+  assert.equal((await row(page, 'A new story').locator('.visibility-label').innerText()).toLowerCase(), 'private');
+
+  await page.goto(`${ORIGIN}/chat-archives`);
+  await page.getByText('Tides and harbours').first().waitFor();
+  assert.equal(await page.getByText('A new story').count(), 0, 'it is not in the public edition');
+});
+
+test('a private story filed again with Public chosen is published', async (t) => {
+  const { page, api } = await open(t, '/chat-archives/desk');
+  await page.getByRole('radio', { name: /^Public/ }).check();
+  await fileLink(page, NOTE, 'is in the edition');
+  assert.deepEqual(api.writes, [
+    { method: 'POST', id: NOTE, body: { share_url: `https://chatgpt.com/share/${NOTE}`, visibility: 'public' } },
+  ]);
+  assert.equal((await row(page, 'A private note').locator('.visibility-label').innerText()).toLowerCase(), 'public');
 });
 
 test('your own story page offers Delete this story with its bin, and deletes in two clicks', async (t) => {

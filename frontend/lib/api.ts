@@ -165,7 +165,12 @@ export function readStory(id: string): Promise<SessionDetail> {
   );
 }
 
-export function ingestSession(shareUrl: string, visibility: Visibility): Promise<IngestResult> {
+/**
+ * File a share link. `visibility` is the filer's own choice, sent only when
+ * they made one: left out, a new story is public and one filed again keeps
+ * what it had.
+ */
+export function ingestSession(shareUrl: string, visibility?: Visibility): Promise<IngestResult> {
   return request<IngestResult>('/api/desk/ingest', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },

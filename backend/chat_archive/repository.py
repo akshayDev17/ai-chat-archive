@@ -478,7 +478,7 @@ class D1ConversationRepository(ConversationRepository):
         row = await self._db.prepare(
             "SELECT 1 AS found FROM conversations WHERE external_id = ? LIMIT 1"
         ).bind(share_id).first()
-        return row is not None
+        return bool(row)
 
     async def get(self, share_id: str, owner_email: str | None = None) -> Conversation | None:
         owner = normalize_email(owner_email)
@@ -611,7 +611,7 @@ class D1ConversationRepository(ConversationRepository):
             stmt = self._db.prepare(MEDIA_KEY_OWNED_SQL).bind(key, owner)
         else:
             stmt = self._db.prepare(MEDIA_KEY_PUBLIC_SQL).bind(key)
-        return await stmt.first() is not None
+        return bool(await stmt.first())
 
     @staticmethod
     def _now() -> str:

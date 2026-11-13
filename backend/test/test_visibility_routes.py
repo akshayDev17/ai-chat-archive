@@ -156,6 +156,9 @@ class VisibilityRoutes:
     def file(self, owner: str = OWNER, visibility: str | None = None, title: str = "A story"):
         """File the story for ``owner`` and copy its image into the store."""
         asyncio.run(self.repo.upsert(replace(story(title).owned_by(owner), visibility=visibility)))
+        self.copy_image()
+
+    def copy_image(self):
         for row in asyncio.run(
             self.repo.claim_media(10, "2026-11-13T00:00:00+00:00", "2026-11-12T00:00:00+00:00")
         ):
@@ -265,7 +268,7 @@ class VisibilityRoutes:
         self.file(visibility="private", title="Mine alone")
 
         status, payload, _ = self.get(f"/api/desk/stories/{SHARE}", OWNER)
-        self.assertEqual((status, payload["title"], payload["visibility"]), (200, "Mine alone", "private"))
+        self.assertEqual((status, payload["title"]), (200, "Mine alone"))
         self.assertEqual(payload["report"], "# Mine alone\n\nA report.")
         src = payload["messages"][1]["media"][0]["src"]
         self.assertEqual(src, f"/api/desk/image/{KEY}")
@@ -350,7 +353,7 @@ class VisibilityRoutes:
         self.assertEqual((status, payload["title"]), (200, "The public copy"))
         self.assertEqual(self.get(f"/api/media/{KEY}")[0], 200)
         status, payload, _ = self.get(f"/api/desk/stories/{SHARE}", OWNER)
-        self.assertEqual((payload["title"], payload["visibility"]), ("The private copy", "private"))
+        self.assertEqual(payload["title"], "The private copy")
 
     # -- filing --------------------------------------------------------------
 
@@ -371,9 +374,23 @@ class VisibilityRoutes:
 
     def test_filing_again_without_saying_keeps_it_private(self):
         self.ingest({"visibility": "private"})
+        self.copy_image()
         status, payload, _ = self.ingest({})
         self.assertEqual((status, payload["visibility"]), (200, "private"))
-        self.assertEqual(self.edition(), [])
+        for who in (ANONYMOUS, OTHER, OWNER):
+            with self.subTest(who=who):
+                self.assertEqual(self.edition(who), [])
+                self.assertEqual(self.get(f"/api/sessions/{SHARE}", who)[0], 404)
+                self.assertEqual(self.get(f"/api/media/{KEY}", who)[0], 404)
+        status, payload, _ = self.get(f"/api/desk/sessions/{SHARE}", OWNER)
+        self.assertEqual((status, payload["yours"], payload["visibility"]), (200, True, "private"))
+        self.assertEqual(self.get(f"/api/desk/image/{KEY}", OWNER)[:2], (200, JPEG))
+
+    def test_filing_again_saying_public_publishes_it(self):
+        self.ingest({"visibility": "private"})
+        status, payload, _ = self.ingest({"visibility": "public"})
+        self.assertEqual((status, payload["visibility"]), (200, "public"))
+        self.assertEqual(self.edition(), [SHARE])
 
     def test_a_filing_with_an_unknown_visibility_is_refused_and_files_nothing(self):
         status, _, _ = self.ingest({"visibility": "secret"})

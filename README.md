@@ -82,7 +82,9 @@ same way. Images are public at `GET /api/media/<key>` exactly when a public stor
 shows them.
 
 **Public or private.** Each filing is one or the other; its filer chooses on the
-filing form (public unless they say otherwise) and can switch it later. A private
+filing form (public unless they say otherwise) and can switch it later. Filing a
+link again without choosing keeps the story as it was, so a private story is never
+published by a re-file. A private
 story is invisible to everyone else, signed in or not: it is left out of
 `GET /api/sessions`, `GET /api/sessions/<share-id>` answers 404, and so does
 `GET /api/media/<key>` for its images — the Worker asks the database whether a
