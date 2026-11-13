@@ -180,6 +180,7 @@ function FileSession({
     try {
       const result = await ingestSession(url, visibility);
       setUrl('');
+      setVisibility(undefined);
       const where =
         result.visibility === 'private' ? 'is filed as private — only you can read it' : 'is in the edition';
       onNote({

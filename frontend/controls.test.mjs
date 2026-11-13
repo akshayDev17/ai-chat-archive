@@ -251,6 +251,24 @@ test('a story filed private and filed again without choosing stays private', asy
   assert.equal(await page.getByText('A new story').count(), 0, 'it is not in the public edition');
 });
 
+test('a choice made for one filing is not carried to the next on the same page', async (t) => {
+  const { page, api } = await open(t, '/chat-archives/desk');
+  const choices = page.getByRole('group', { name: 'Who can read it' });
+  await choices.getByRole('radio', { name: /^Public/ }).check();
+  await fileLink(page, FRESH, 'is in the edition');
+  assert.equal(await choices.getByRole('radio', { name: /^Public/ }).isChecked(), false);
+  assert.equal(await choices.getByRole('radio', { name: /^Private/ }).isChecked(), false);
+
+  // No reload: your private story's link, the choice left alone.
+  await fileLink(page, NOTE, '“A private note” is filed as private — only you can read it');
+  assert.deepEqual(api.writes, [
+    { method: 'POST', id: FRESH, body: { share_url: `https://chatgpt.com/share/${FRESH}`, visibility: 'public' } },
+    { method: 'POST', id: NOTE, body: { share_url: `https://chatgpt.com/share/${NOTE}` } },
+  ]);
+  assert.equal(api.stories.get(NOTE).visibility, 'private');
+  assert.equal((await row(page, 'A private note').locator('.visibility-label').innerText()).toLowerCase(), 'private');
+});
+
 test('a private story filed again with Public chosen is published', async (t) => {
   const { page, api } = await open(t, '/chat-archives/desk');
   await page.getByRole('radio', { name: /^Public/ }).check();
