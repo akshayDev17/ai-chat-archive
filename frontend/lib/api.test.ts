@@ -11,7 +11,17 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { ApiError, SIGN_IN_RETRY_DELAY_MS, isSignInRequired, retractSession, whoami } from './api.ts';
+import {
+  ApiError,
+  SIGN_IN_RETRY_DELAY_MS,
+  ingestSession,
+  isSignInRequired,
+  ownImageSrc,
+  readStory,
+  retractSession,
+  setVisibility,
+  whoami,
+} from './api.ts';
 
 const realFetch = globalThis.fetch;
 
@@ -67,4 +77,60 @@ test('a retried write is sent again with its method', async () => {
   await retractSession('abc');
   assert.equal(calls.length, 2);
   assert.equal(calls[1].init?.method, 'DELETE');
+});
+
+test('a story is read from the public permalink when it is public', async () => {
+  const calls = scriptFetch(json({ id: 'abc', title: 'Public' }));
+  assert.equal((await readStory('abc')).title, 'Public');
+  assert.deepEqual(calls.map((c) => new URL(c.url).pathname), ['/api/sessions/abc']);
+});
+
+test('a story absent from the public permalink is read as your own copy', async () => {
+  const calls = scriptFetch(
+    json({ error: 'Not found' }, 404),
+    json({ id: 'abc', title: 'Mine alone', visibility: 'private' }),
+  );
+  const story = await readStory('abc');
+  assert.equal(story.visibility, 'private');
+  assert.deepEqual(
+    calls.map((c) => new URL(c.url).pathname),
+    ['/api/sessions/abc', '/api/desk/stories/abc'],
+  );
+});
+
+test('a story that is neither public nor yours reports the public answer', async () => {
+  scriptFetch(
+    json({ error: 'Not found' }, 404),
+    json({ error: 'You have no filed story with that id' }, 404),
+  );
+  await assert.rejects(readStory('abc'), (error: unknown) => {
+    assert.ok(error instanceof ApiError);
+    assert.equal(error.status, 404);
+    assert.equal(error.message, 'Not found');
+    return true;
+  });
+});
+
+test('changing visibility sends a PATCH naming the new one', async () => {
+  const calls = scriptFetch(json({ id: 'abc', visibility: 'private' }));
+  await setVisibility('abc', 'private');
+  assert.equal(new URL(calls[0].url).pathname, '/api/desk/sessions/abc');
+  assert.equal(calls[0].init?.method, 'PATCH');
+  assert.deepEqual(JSON.parse(String(calls[0].init?.body)), { visibility: 'private' });
+});
+
+test('filing says whether the story is public or private', async () => {
+  const calls = scriptFetch(json({ share_id: 'abc', visibility: 'private' }));
+  await ingestSession('https://chatgpt.com/share/abc', 'private');
+  assert.deepEqual(JSON.parse(String(calls[0].init?.body)), {
+    share_url: 'https://chatgpt.com/share/abc',
+    visibility: 'private',
+  });
+});
+
+test('your own images are asked for on the signed-in route', () => {
+  assert.equal(
+    new URL(ownImageSrc('chat-archives/abc/msg-1/01.jpg')).pathname,
+    '/api/desk/image/chat-archives/abc/msg-1/01.jpg',
+  );
 });

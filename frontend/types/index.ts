@@ -14,9 +14,18 @@ export interface Session {
 }
 
 export interface SessionListResponse {
-  /** Present only on the owner-scoped `/api/desk/filings` read. */
-  owner?: string;
   sessions: Session[];
+}
+
+/**
+ * Who can read a story. A private one is out of the edition and readable only
+ * by its filer, signed in; so are its images.
+ */
+export type Visibility = 'public' | 'private';
+
+/** One of your own filings, as the copy desk lists it — private ones included. */
+export interface Filing extends Session {
+  visibility: Visibility;
 }
 
 export interface WhoAmI {
@@ -77,6 +86,8 @@ export interface SessionDetail {
   report: string | null;
   citations: Citation[];
   messages: Message[];
+  /** Present only when the filer reads their own copy through the desk. */
+  visibility?: Visibility;
 }
 
 export interface IngestResult {
@@ -87,12 +98,15 @@ export interface IngestResult {
   citations: number;
   /** Images found in GenUI replies, queued for copying. */
   images: number;
+  /** How it was stored: as asked, or as it already was when filed again. */
+  visibility: Visibility;
 }
 
 /** One filing's image-copy progress, as the media page lists it. */
 export interface MediaFiling {
   id: string;
   title: string;
+  visibility: Visibility;
   total: number;
   copied: number;
   failed: number;
@@ -120,5 +134,6 @@ export interface MediaImage {
 export interface MediaStory {
   id: string;
   title: string;
+  visibility: Visibility;
   images: MediaImage[];
 }

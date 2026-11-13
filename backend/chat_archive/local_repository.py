@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from .models import Conversation, normalize_email
+from .models import PUBLIC, Conversation, checked_visibility, normalize_email
 from .ports import ConversationRepository
 from .repository import RECLAIM_ERROR, claimed_row, media_by_message, media_image, media_paths, media_rows_for
 
@@ -39,6 +39,11 @@ class MemoryConversationRepository(ConversationRepository):
         if not owner:
             raise ValueError("Refusing to store a conversation with no owner_email.")
         key = (owner, conversation.share_id)
+        if conversation.visibility is not None:
+            checked_visibility(conversation.visibility)
+        # Not said: a new story is public, one filed again keeps what it had.
+        previous = self._by_key.get(key)
+        visibility = conversation.visibility or (previous.visibility if previous else PUBLIC)
 
         paths = {p for ps in media_paths(conversation.share_id, conversation.messages) for p in ps}
         copied = {
@@ -51,16 +56,20 @@ class MemoryConversationRepository(ConversationRepository):
             self._media.append(
                 {**dict(zip(_MEDIA_COLUMNS, values)), "attempts": 0, "last_error": None, "claimed_at": None}
             )
-        self._by_key[key] = conversation
+        self._by_key[key] = replace(conversation, visibility=visibility)
 
     async def get(self, share_id: str, owner_email: str | None = None) -> Conversation | None:
         owner = normalize_email(owner_email)
         if owner:
             key = (owner, share_id) if (owner, share_id) in self._by_key else None
         else:
-            # Public permalink: most recently inserted copy wins.
+            # Public permalink: most recently inserted public copy wins.
             key = next(
-                (k for k in reversed(list(self._by_key)) if k[1] == share_id), None
+                (
+                    k for k in reversed(list(self._by_key))
+                    if k[1] == share_id and self._by_key[k].visibility == PUBLIC
+                ),
+                None,
             )
         if key is None:
             return None
@@ -81,9 +90,28 @@ class MemoryConversationRepository(ConversationRepository):
         self._media = [row for row in self._media if row["key"] != (owner, share_id)]
         return self._by_key.pop((owner, share_id), None) is not None
 
+    async def set_visibility(self, share_id: str, owner_email: str, visibility: str) -> bool:
+        owner = normalize_email(owner_email)
+        if not owner:
+            raise ValueError("set_visibility requires an owner_email.")
+        checked_visibility(visibility)
+        key = (owner, share_id)
+        if key not in self._by_key:
+            return False
+        self._by_key[key] = replace(self._by_key[key], visibility=visibility)
+        return True
+
+    async def is_filed(self, share_id: str) -> bool:
+        return any(key[1] == share_id for key in self._by_key)
+
     async def list_all(self, limit: int = 200) -> list[dict]:
-        """The public edition: every filed story, newest first, no owner filter."""
-        return self._rows(list(reversed(list(self._by_key.items()))), limit)
+        """The public edition: every public story, newest first, no owner filter."""
+        public = [
+            (key, conversation)
+            for key, conversation in reversed(list(self._by_key.items()))
+            if conversation.visibility == PUBLIC
+        ]
+        return self._rows(public, limit)
 
     async def list_recent(self, owner_email: str, limit: int = 200) -> list[dict]:
         owner = normalize_email(owner_email)
@@ -95,7 +123,10 @@ class MemoryConversationRepository(ConversationRepository):
             for key, conversation in reversed(list(self._by_key.items()))
             if key[0] == owner
         ]
-        return self._rows(matching, limit)
+        return [
+            {**row, "visibility": conversation.visibility}
+            for row, (_, conversation) in zip(self._rows(matching, limit), matching)
+        ]
 
     # -- media ----------------------------------------------------------------
 
@@ -125,6 +156,7 @@ class MemoryConversationRepository(ConversationRepository):
                 {
                     "id": key[1],
                     "title": self._by_key[key].title,
+                    "visibility": self._by_key[key].visibility,
                     "total": len(rows),
                     "copied": statuses.count("copied"),
                     "failed": statuses.count("failed"),
@@ -140,6 +172,7 @@ class MemoryConversationRepository(ConversationRepository):
         return {
             "id": share_id,
             "title": self._by_key[key].title,
+            "visibility": self._by_key[key].visibility,
             "images": [media_image(r) for r in self._rows_for(key)],
         }
 
@@ -205,6 +238,14 @@ class MemoryConversationRepository(ConversationRepository):
     async def referenced_keys(self, keys: list[str]) -> set[str]:
         wanted = set(keys)
         return {row["r2_key"] for row in self._media if row["r2_key"] in wanted}
+
+    async def media_key_readable(self, key: str, owner_email: str | None = None) -> bool:
+        owner = normalize_email(owner_email)
+        return any(
+            row["r2_key"] == key
+            and (row["key"][0] == owner if owner else self._by_key[row["key"]].visibility == PUBLIC)
+            for row in self._media
+        )
 
     @staticmethod
     def _rows(items, limit: int) -> list[dict]:

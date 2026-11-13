@@ -48,6 +48,11 @@ class ConversationRepository(ABC):
     which is which: :meth:`list_all` is the public edition,
     :meth:`list_recent` is one reader's own filings. There is no overload where
     a missing argument silently widens the query.
+
+    Visibility *is* access control. A ``private`` conversation is returned only
+    by the methods that take its owner's email; every unscoped read
+    (:meth:`list_all`, :meth:`get` without an owner, :meth:`media_key_readable`
+    without an owner) leaves it out.
     """
 
     @abstractmethod
@@ -56,19 +61,43 @@ class ConversationRepository(ABC):
 
         The conversation's ``owner_email`` records who filed it; an empty owner
         is rejected by implementations rather than stored.
+
+        Its ``visibility`` is stored as given. ``None`` means the filer did not
+        say: a new story is stored ``public``, and a story filed again keeps
+        the visibility it had.
         """
 
     @abstractmethod
     async def list_all(self, limit: int = 200) -> list[dict]:
-        """Every filed conversation, newest first — the public edition.
+        """Every public conversation, newest first — the public edition.
 
         Deliberately not filtered by owner: the front page is the newspaper, and
-        everyone reads the same edition.
+        everyone reads the same edition. Private conversations are left out.
         """
 
     @abstractmethod
     async def list_recent(self, owner_email: str, limit: int = 200) -> list[dict]:
-        """One reader's own filings, newest first — what the copy desk shows back."""
+        """One reader's own filings, newest first — what the copy desk shows back.
+
+        Public and private alike: each row carries its ``visibility``.
+        """
+
+    @abstractmethod
+    async def set_visibility(self, share_id: str, owner_email: str, visibility: str) -> bool:
+        """Make the caller's copy of a story ``public`` or ``private``.
+
+        Owner-scoped like :meth:`delete`: returns False when this reader has no
+        copy, and another filer's copy of the same link is untouched. Raises on
+        an empty owner or a visibility that is neither.
+        """
+
+    @abstractmethod
+    async def is_filed(self, share_id: str) -> bool:
+        """Whether anyone still has a copy of this story, public or private.
+
+        Not a read: it decides whether the story's shared image folder is still
+        in use, so a private copy counts.
+        """
 
     @abstractmethod
     async def delete(self, share_id: str, owner_email: str) -> bool:
@@ -91,14 +120,14 @@ class ConversationRepository(ABC):
     @abstractmethod
     async def media_summary(self, owner_email: str) -> list[dict]:
         """Per filing with images, newest first:
-        ``{"id", "title", "total", "copied", "failed", "pending"}``.
+        ``{"id", "title", "visibility", "total", "copied", "failed", "pending"}``.
 
         ``pending`` counts rows still ``pending`` or ``copying``.
         """
 
     @abstractmethod
     async def media_for(self, share_id: str, owner_email: str) -> dict | None:
-        """``{"id", "title", "images": [...]}`` for one of the caller's stories.
+        """``{"id", "title", "visibility", "images": [...]}`` for one of the caller's stories.
 
         ``None`` when the caller has not filed it. Each image:
         ``{"id", "message_seq", "tag_start", "ordinal", "content_url",
@@ -144,12 +173,23 @@ class ConversationRepository(ABC):
         """Which of these R2 keys any image row still points at."""
 
     @abstractmethod
+    async def media_key_readable(self, key: str, owner_email: str | None = None) -> bool:
+        """Whether the image stored at ``key`` may be served.
+
+        With ``owner_email`` left as ``None`` the question is the *public* one:
+        true only when a public story shows the image. With it set, true only
+        when one of that reader's own stories shows it, public or private. A
+        key no story points at is readable by nobody.
+        """
+
+    @abstractmethod
     async def get(self, share_id: str, owner_email: str | None = None) -> Conversation | None:
         """Return one conversation (messages + report), or None if absent.
 
-        With ``owner_email`` set, only that reader's copy matches. With it left
-        as ``None`` the lookup is the *public* one: a story reachable by its
-        permalink regardless of who filed it.
+        With ``owner_email`` set, only that reader's copy matches, public or
+        private. With it left as ``None`` the lookup is the *public* one: the
+        newest public copy of the story, regardless of who filed it — a story
+        whose every copy is private is absent.
         """
 
 

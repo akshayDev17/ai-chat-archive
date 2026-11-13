@@ -1,9 +1,12 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { ingestSession, isSignInRequired, signOut, whoami } from '@/lib/api';
+import { useCallback, useEffect, useState } from 'react';
+import { ingestSession, isSignInRequired, listFilings, signOut, whoami } from '@/lib/api';
 import { AFTER_SIGN_IN, AFTER_SIGN_OUT } from '@/lib/nav';
+import { headline } from '@/lib/story';
+import type { Filing, Visibility } from '@/types';
 import Retract from './Retract';
+import VisibilityControl from './VisibilityControl';
 
 /**
  * The copy desk: where a share link becomes a story in the paper.
@@ -17,10 +20,10 @@ import Retract from './Retract';
  * an identity. Bouncing to the sign-in screen (with `next` pointing back here)
  * is the friendly rendering of that same fact, not a substitute for it.
  *
- * One job, one page: the form. There was briefly a "your recent filings" list
- * underneath, which made a single-purpose page into a dashboard — the filed
- * story is already in the edition, one click away on the front page, and
- * `archive:updated` refreshes it.
+ * The form first, then what you have filed. The list is here because the desk
+ * is the one place that knows which stories are yours: a private story is in no
+ * edition, so without it there would be nowhere to find one again, and it is
+ * where each story's own controls — public or private, delete — sit together.
  */
 export default function CopyDesk() {
   const [email, setEmail] = useState<string | null>(null);
@@ -81,45 +84,116 @@ export default function CopyDesk() {
         </p>
       </section>
 
-      <FileSession />
+      <DeskWork />
     </div>
   );
 }
 
-/** The filing form itself: one field, one button, one honest status line. */
-function FileSession() {
+/** What the form last did, shown in its status line. */
+interface Note {
+  text: string;
+  tone: 'ok' | 'warn' | 'error';
+  /** The story this note announces, so it can be deleted from here. */
+  filed?: { id: string; title: string };
+  /** Images in it, queued for copying — linked to their progress. */
+  images?: number;
+}
+
+function deletedNote(title: string): Note {
+  return { text: `“${title}” was deleted — the transcript, report, sources and images are gone.`, tone: 'ok' };
+}
+
+/**
+ * The form and the list under it, sharing what they both change: filing adds a
+ * row, and deleting a story — from the form's status line or from its row —
+ * removes the row and takes back the line that announced it.
+ */
+function DeskWork() {
+  const [note, setNote] = useState<Note | null>(null);
+  const [filings, setFilings] = useState<Filing[] | null>(null);
+  const [listError, setListError] = useState<string | null>(null);
+
+  const loadFilings = useCallback(() => {
+    listFilings()
+      .then((rows) => {
+        setFilings(rows);
+        setListError(null);
+      })
+      .catch((e) =>
+        setListError(
+          isSignInRequired(e)
+            ? 'Your session expired — sign in again to see your filings.'
+            : e instanceof Error
+              ? e.message
+              : 'Could not load your filings',
+        ),
+      );
+  }, []);
+  useEffect(loadFilings, [loadFilings]);
+
+  // Called only after the server confirmed the delete (see `Retract`).
+  function forget(id: string, title: string) {
+    setFilings((rows) => rows?.filter((row) => row.id !== id) ?? rows);
+    setNote((current) => (current?.filed?.id === id ? deletedNote(title) : current));
+  }
+
+  function changeVisibility(id: string, visibility: Visibility) {
+    setFilings((rows) => rows?.map((row) => (row.id === id ? { ...row, visibility } : row)) ?? rows);
+  }
+
+  return (
+    <>
+      <FileSession note={note} onNote={setNote} onFiled={loadFilings} onDeleted={forget} />
+      <Filings
+        filings={filings}
+        error={listError}
+        onDeleted={forget}
+        onVisibility={changeVisibility}
+      />
+    </>
+  );
+}
+
+/** The filing form itself: one field, one choice, one button, one honest status line. */
+function FileSession({
+  note,
+  onNote,
+  onFiled,
+  onDeleted,
+}: {
+  note: Note | null;
+  onNote: (note: Note | null) => void;
+  onFiled: () => void;
+  onDeleted: (id: string, title: string) => void;
+}) {
   const [url, setUrl] = useState('');
+  const [visibility, setVisibility] = useState<Visibility>('public');
   const [busy, setBusy] = useState(false);
-  const [note, setNote] = useState<{
-    text: string;
-    tone: 'ok' | 'warn' | 'error';
-    /** The story this note announces, so it can be retracted from here. */
-    filed?: { id: string; title: string };
-    /** Images in it, queued for copying — linked to their progress. */
-    images?: number;
-  } | null>(null);
   const filed = note?.filed;
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     setBusy(true);
-    setNote(null);
+    onNote(null);
     try {
-      const result = await ingestSession(url);
+      const result = await ingestSession(url, visibility);
       setUrl('');
-      setNote({
+      const where =
+        result.visibility === 'private' ? 'is filed as private — only you can read it' : 'is in the edition';
+      onNote({
         filed: { id: result.share_id, title: result.title },
         images: result.images,
         // A filed session with no report is not a failure — the transcript is
-        // there and the story is in the edition — but it is not what was asked
-        // for either, and staying quiet about it is how a missing report went
+        // there and the story is filed — but it is not what was asked for
+        // either, and staying quiet about it is how a missing report went
         // unnoticed until someone opened the story and asked why it was empty.
         tone: result.report_length > 0 ? 'ok' : 'warn',
         text:
           result.report_length > 0
-            ? `“${result.title}” is in the edition — ${result.messages} messages, ${result.citations} citations.`
-            : `“${result.title}” is in the edition, but no summary report was found in that share — it will read as a transcript only.`,
+            ? `“${result.title}” ${where} — ${result.messages} messages, ${result.citations} citations.`
+            : `“${result.title}” ${where}, but no summary report was found in that share — it will read as a transcript only.`,
       });
+      onFiled();
       // Tells the front page (another tab included) to re-read the edition.
       window.dispatchEvent(new Event('archive:updated'));
     } catch (error) {
@@ -127,9 +201,9 @@ function FileSession() {
         // The session expired between opening the desk and filing. Access
         // answers a fetch() with a redirect that the browser follows as a GET,
         // dropping the POST body, so the import would otherwise fail silently.
-        setNote({ text: 'Your session expired — sign in again to file.', tone: 'error' });
+        onNote({ text: 'Your session expired — sign in again to file.', tone: 'error' });
       } else {
-        setNote({
+        onNote({
           text: error instanceof Error ? error.message : 'Import failed',
           tone: 'error',
         });
@@ -160,6 +234,28 @@ function FileSession() {
           {busy ? 'Filing…' : 'File it'}
         </button>
       </div>
+      <fieldset className="file-visibility">
+        <legend>Who can read it</legend>
+        {(
+          [
+            ['public', 'Public', 'in the edition, for everyone'],
+            ['private', 'Private', 'only you, signed in'],
+          ] as const
+        ).map(([value, name, meaning]) => (
+          <label key={value} className="file-choice">
+            <input
+              type="radio"
+              name="visibility"
+              value={value}
+              checked={visibility === value}
+              onChange={() => setVisibility(value)}
+            />
+            <span>
+              <strong>{name}</strong> — {meaning}
+            </span>
+          </label>
+        ))}
+      </fieldset>
       <p
         className={note && note.tone !== 'ok' ? `file-msg ${note.tone}` : 'file-msg'}
         role="status"
@@ -187,13 +283,8 @@ function FileSession() {
                 <Retract
                   key={filed.id}
                   id={filed.id}
-                  label="Retract it"
-                  onRetracted={() =>
-                    setNote({
-                      text: `“${filed.title}” was retracted — it is out of the edition.`,
-                      tone: 'ok',
-                    })
-                  }
+                  label="Delete it"
+                  onRetracted={() => onDeleted(filed.id, filed.title)}
                 />
               </>
             ) : null}
@@ -205,5 +296,68 @@ function FileSession() {
         )}
       </p>
     </form>
+  );
+}
+
+/**
+ * Your filings, newest first, each with its own controls.
+ *
+ * A row leaves the list only when `onDeleted` runs, which `Retract` calls after
+ * the server has confirmed; if the delete fails the row stays, with the reason
+ * shown beside its confirmation.
+ */
+function Filings({
+  filings,
+  error,
+  onDeleted,
+  onVisibility,
+}: {
+  filings: Filing[] | null;
+  error: string | null;
+  onDeleted: (id: string, title: string) => void;
+  onVisibility: (id: string, visibility: Visibility) => void;
+}) {
+  return (
+    <section className="filings" aria-labelledby="filings-heading">
+      <h2 className="kicker" id="filings-heading">
+        Your filings
+      </h2>
+      {error ? <div className="status error">{error}</div> : null}
+      {!filings && !error ? <p className="fine">Reading your filings…</p> : null}
+      {filings && !filings.length ? (
+        <p className="fine">Nothing filed yet. A story you file appears here.</p>
+      ) : null}
+      {filings && filings.length ? (
+        <ul className="filing-list">
+          {filings.map((filing) => {
+            const title = headline(filing);
+            return (
+              <li key={filing.id} className="filing-row">
+                <a className="filing-title" href={`/chat-archives/${encodeURIComponent(filing.id)}`}>
+                  {title}
+                </a>
+                <div className="filing-tools">
+                  {filing.created_at ? (
+                    <span className="filing-date">{filing.created_at.slice(0, 10)}</span>
+                  ) : null}
+                  <VisibilityControl
+                    id={filing.id}
+                    visibility={filing.visibility}
+                    name={title}
+                    onChanged={(visibility) => onVisibility(filing.id, visibility)}
+                  />
+                  <Retract
+                    id={filing.id}
+                    label="Delete"
+                    name={`Delete “${title}”`}
+                    onRetracted={() => onDeleted(filing.id, title)}
+                  />
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      ) : null}
+    </section>
   );
 }

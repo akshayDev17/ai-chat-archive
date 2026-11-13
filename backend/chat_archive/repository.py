@@ -5,7 +5,16 @@ from __future__ import annotations
 import json
 import uuid
 
-from .models import Citation, Conversation, Media, Message, Source, normalize_email
+from .models import (
+    PUBLIC,
+    Citation,
+    Conversation,
+    Media,
+    Message,
+    Source,
+    checked_visibility,
+    normalize_email,
+)
 from .ports import ConversationRepository
 
 # -- media SQL, shared with the SQLite repository -----------------------------
@@ -39,7 +48,7 @@ MEDIA_FOR_CONVERSATION_SQL = (
 
 #: (owner_email,)
 MEDIA_SUMMARY_SQL = (
-    "SELECT c.external_id AS id, c.title, COUNT(m.id) AS total, "
+    "SELECT c.external_id AS id, c.title, c.visibility, COUNT(m.id) AS total, "
     "SUM(CASE WHEN m.status = 'copied' THEN 1 ELSE 0 END) AS copied, "
     "SUM(CASE WHEN m.status = 'failed' THEN 1 ELSE 0 END) AS failed, "
     "SUM(CASE WHEN m.status IN ('pending', 'copying') THEN 1 ELSE 0 END) AS pending "
@@ -89,6 +98,18 @@ MEDIA_CLAIM_ONE_STORY_SQL = _MEDIA_CLAIM_SQL.format(
 #: (json.dumps(r2_keys),) — which of these keys rows still point at.
 REFERENCED_KEYS_SQL = (
     "SELECT DISTINCT r2_key FROM media WHERE r2_key IN (SELECT value FROM json_each(?))"
+)
+
+#: (r2_key,) — does a public story show the image stored at this key?
+MEDIA_KEY_PUBLIC_SQL = (
+    "SELECT 1 AS found FROM media m JOIN conversations c ON c.id = m.conversation_id "
+    "WHERE m.r2_key = ? AND c.visibility = 'public' LIMIT 1"
+)
+
+#: (r2_key, owner_email) — does one of this reader's own stories show it?
+MEDIA_KEY_OWNED_SQL = (
+    "SELECT 1 AS found FROM media m JOIN conversations c ON c.id = m.conversation_id "
+    "WHERE m.r2_key = ? AND c.owner_email = ? LIMIT 1"
 )
 
 #: (r2_key, content_type, media_id)
@@ -261,11 +282,20 @@ class D1ConversationRepository(ConversationRepository):
                 for r in found.results
             }
 
+        visibility = conversation.visibility
+        if visibility is not None:
+            checked_visibility(visibility)
+
         conv_id = existing["id"] if existing else str(uuid.uuid4())
         if existing:
             await self._db.prepare(
                 "UPDATE conversations SET title = ?, updated_at = ? WHERE id = ?"
             ).bind(conversation.title, now, conv_id).run()
+            # Filed again without saying: the story keeps what it had.
+            if visibility is not None:
+                await self._db.prepare(
+                    "UPDATE conversations SET visibility = ? WHERE id = ?"
+                ).bind(visibility, conv_id).run()
             await self._db.prepare(
                 "DELETE FROM messages WHERE conversation_id = ?"
             ).bind(conv_id).run()
@@ -281,8 +311,8 @@ class D1ConversationRepository(ConversationRepository):
         else:
             await self._db.prepare(
                 "INSERT INTO conversations "
-                "(id, owner_email, external_id, title, created_at, updated_at, source) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)"
+                "(id, owner_email, external_id, title, created_at, updated_at, source, visibility) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
             ).bind(
                 conv_id,
                 owner,
@@ -291,6 +321,7 @@ class D1ConversationRepository(ConversationRepository):
                 now,
                 now,
                 "chatgpt",
+                visibility or PUBLIC,
             ).run()
 
         message_stmt = self._db.prepare(
@@ -363,7 +394,7 @@ class D1ConversationRepository(ConversationRepository):
             ).bind(report_id, conv_id).run()
 
     async def list_all(self, limit: int = 200) -> list[dict]:
-        """The public edition: every filed story, newest first, no owner filter.
+        """The public edition: every public story, newest first, no owner filter.
 
         ``owner_email`` is deliberately **not selected**. This row shape is
         served to anonymous visitors, so including the filer's address would
@@ -376,6 +407,7 @@ class D1ConversationRepository(ConversationRepository):
             "SELECT c.external_id AS id, c.title, c.created_at, c.source, r.markdown "
             "FROM conversations c "
             "LEFT JOIN reports r ON r.conversation_id = c.id "
+            "WHERE c.visibility = 'public' "
             "ORDER BY c.created_at DESC LIMIT ?"
         ).bind(limit).all()
         return list(result.results)
@@ -391,9 +423,10 @@ class D1ConversationRepository(ConversationRepository):
 
         # Same row shape as list_all, and for the same reason: no owner_email on
         # the wire. The endpoint that calls this already knows who is asking —
-        # it returns `owner` at the top level.
+        # it returns `owner` at the top level. It does carry `visibility`: these
+        # are the reader's own stories, private ones included.
         result = await self._db.prepare(
-            "SELECT c.external_id AS id, c.title, c.created_at, c.source, r.markdown "
+            "SELECT c.external_id AS id, c.title, c.created_at, c.source, c.visibility, r.markdown "
             "FROM conversations c "
             "LEFT JOIN reports r ON r.conversation_id = c.id "
             "WHERE c.owner_email = ? "
@@ -425,20 +458,44 @@ class D1ConversationRepository(ConversationRepository):
         )
         return True
 
+    async def set_visibility(self, share_id: str, owner_email: str, visibility: str) -> bool:
+        owner = normalize_email(owner_email)
+        if not owner:
+            raise ValueError("set_visibility requires an owner_email.")
+        checked_visibility(visibility)
+
+        row = await self._db.prepare(
+            "SELECT id FROM conversations WHERE owner_email = ? AND external_id = ?"
+        ).bind(owner, share_id).first()
+        if not row:
+            return False
+        await self._db.prepare(
+            "UPDATE conversations SET visibility = ? WHERE id = ?"
+        ).bind(visibility, row["id"]).run()
+        return True
+
+    async def is_filed(self, share_id: str) -> bool:
+        row = await self._db.prepare(
+            "SELECT 1 AS found FROM conversations WHERE external_id = ? LIMIT 1"
+        ).bind(share_id).first()
+        return row is not None
+
     async def get(self, share_id: str, owner_email: str | None = None) -> Conversation | None:
         owner = normalize_email(owner_email)
 
         if owner:
             row = await self._db.prepare(
-                "SELECT id, title, owner_email FROM conversations "
+                "SELECT id, title, owner_email, visibility FROM conversations "
                 "WHERE external_id = ? AND owner_email = ?"
             ).bind(share_id, owner).first()
         else:
-            # Public permalink: newest copy wins, so a story that two readers
-            # archived still resolves to something stable rather than 404ing.
+            # Public permalink: newest public copy wins, so a story that two
+            # readers archived still resolves to something stable rather than
+            # 404ing — and a private copy is never the one that answers.
             row = await self._db.prepare(
-                "SELECT id, title, owner_email FROM conversations "
-                "WHERE external_id = ? ORDER BY created_at DESC LIMIT 1"
+                "SELECT id, title, owner_email, visibility FROM conversations "
+                "WHERE external_id = ? AND visibility = 'public' "
+                "ORDER BY created_at DESC LIMIT 1"
             ).bind(share_id).first()
 
         if not row:
@@ -478,6 +535,7 @@ class D1ConversationRepository(ConversationRepository):
             report=report["markdown"] if report else None,
             citations=citations,
             owner_email=row["owner_email"],
+            visibility=row["visibility"],
         )
 
     # -- media ----------------------------------------------------------------
@@ -487,7 +545,8 @@ class D1ConversationRepository(ConversationRepository):
         if not owner:
             raise ValueError("media operations require an owner_email.")
         return await self._db.prepare(
-            "SELECT id, title FROM conversations WHERE owner_email = ? AND external_id = ?"
+            "SELECT id, title, visibility FROM conversations "
+            "WHERE owner_email = ? AND external_id = ?"
         ).bind(owner, share_id).first()
 
     async def media_summary(self, owner_email: str) -> list[dict]:
@@ -505,6 +564,7 @@ class D1ConversationRepository(ConversationRepository):
         return {
             "id": share_id,
             "title": conv["title"],
+            "visibility": conv["visibility"],
             "images": [media_image(r) for r in rows.results],
         }
 
@@ -544,6 +604,14 @@ class D1ConversationRepository(ConversationRepository):
             return set()
         result = await self._db.prepare(REFERENCED_KEYS_SQL).bind(json.dumps(keys)).all()
         return {r["r2_key"] for r in result.results}
+
+    async def media_key_readable(self, key: str, owner_email: str | None = None) -> bool:
+        owner = normalize_email(owner_email)
+        if owner:
+            stmt = self._db.prepare(MEDIA_KEY_OWNED_SQL).bind(key, owner)
+        else:
+            stmt = self._db.prepare(MEDIA_KEY_PUBLIC_SQL).bind(key)
+        return await stmt.first() is not None
 
     @staticmethod
     def _now() -> str:

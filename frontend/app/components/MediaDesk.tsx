@@ -5,12 +5,13 @@ import {
   copyMediaNow,
   isSignInRequired,
   mediaFor,
-  mediaSrc,
   mediaSummary,
+  ownImageSrc,
   retryMedia,
   whoami,
 } from '@/lib/api';
 import type { MediaFiling, MediaImage, MediaStory } from '@/types';
+import { VisibilityLabel } from './VisibilityControl';
 
 const HERE = '/chat-archives/desk/media';
 /** How often to re-read while anything is still being copied. */
@@ -106,7 +107,15 @@ function MediaList() {
             <li key={f.id}>
               {/* A full navigation: the story view reads `?id` once, on load. */}
               <a href={`${HERE}?id=${encodeURIComponent(f.id)}`} className="media-row">
-                <span className="media-title">{f.title}</span>
+                <span className="media-title">
+                  {f.title}
+                  {f.visibility === 'private' ? (
+                    <>
+                      {' '}
+                      <VisibilityLabel visibility="private" />
+                    </>
+                  ) : null}
+                </span>
                 <span className="media-count">
                   {f.copied} / {f.total} copied
                   {f.failed ? ` · ${f.failed} failed` : ''}
@@ -182,7 +191,15 @@ function StoryMedia({ id }: { id: string }) {
       {story ? (
         <>
           <section className="desk-intro">
-            <div className="kicker">Media · {statusWord({ copied, failed, pending, total: images.length })}</div>
+            <div className="kicker">
+              Media · {statusWord({ copied, failed, pending, total: images.length })}
+              {story.visibility === 'private' ? (
+                <>
+                  {' · '}
+                  <VisibilityLabel visibility="private" />
+                </>
+              ) : null}
+            </div>
             <h1 className="hl">{story.title}</h1>
             <p className="fine">
               {copied} / {images.length} copied
@@ -233,7 +250,7 @@ function MediaTile({ image }: { image: MediaImage }) {
     <li className={`media-tile media-${image.status}`}>
       {image.status === 'copied' && image.r2_key ? (
         // eslint-disable-next-line @next/next/no-img-element -- static export, no image optimiser
-        <img src={mediaSrc(`/api/media/${image.r2_key}`)} alt="" loading="lazy" />
+        <img src={ownImageSrc(image.r2_key)} alt="" loading="lazy" />
       ) : (
         <div className="media-placeholder">{image.status === 'failed' ? '!' : '…'}</div>
       )}

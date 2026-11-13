@@ -65,24 +65,40 @@ behind it). Locally a dev server stands in for it.
 
 | Route | Anyone | Signed in |
 |---|---|---|
-| `/chat-archives` — the edition | **every filed story** | same |
-| `/chat-archives/<share-id>` — one story | **readable** | readable; **Retract** and an **Images** progress link if you filed it |
+| `/chat-archives` — the edition | **every public story** | same |
+| `/chat-archives/<share-id>` — one story | **readable** if public; a private one is not found | the same; if you filed it: readable even when private, a **Public**/**Private** label with **Make private**/**Make public**, **Delete this story**, and an **Images** progress link |
 | `/chat-archives/login` — sign in | screen | redirects to the desk |
-| `/chat-archives/desk` — file copy | redirected to sign in | the filing form, with **Retract it** on what you just filed |
+| `/chat-archives/desk` — file copy | redirected to sign in | the filing form, with a **Public**/**Private** choice and **Delete it** on what you just filed; under it, your filings, each row with its **Public**/**Private** label and switch and **Delete** |
 | `/chat-archives/desk/media` — your images | redirected to sign in | copy progress per story, **Retry failed**, **Copy now** |
 
-One rule, stated once: **public reads, private writes.** The only gated actions
-are `POST /api/desk/ingest`, `GET /api/desk/filings`, and the retraction pair
-under `/api/desk/sessions/<share-id>`: `GET` answers `{"yours": bool}` so a story
-knows whether to offer the control, and `DELETE` takes your copy out of the edition
-with its transcript, report, sources and images — its rows in D1 and its files in R2 (404 if you have no copy).
+One rule, stated once: **public reads, private writes.** The gated actions
+are `POST /api/desk/ingest`, `GET /api/desk/filings`, and three on
+`/api/desk/sessions/<share-id>`: `GET` answers `{"yours": bool, "visibility": …}`
+so a story knows whether to offer its controls, `PATCH {"visibility": "public" | "private"}`
+switches your copy, and `DELETE` deletes your copy
+with its transcript, report, sources and images — its rows in D1 and its files in R2 (each is 404 if you have no copy).
 `/api/desk/media[/<share-id>[/retry|/copy]]` is the media page's API, scoped the
-same way. Images themselves are public at `GET /api/media/<key>`, like the story
-they belong to.
+same way. Images are public at `GET /api/media/<key>` exactly when a public story
+shows them.
+
+**Public or private.** Each filing is one or the other; its filer chooses on the
+filing form (public unless they say otherwise) and can switch it later. A private
+story is invisible to everyone else, signed in or not: it is left out of
+`GET /api/sessions`, `GET /api/sessions/<share-id>` answers 404, and so does
+`GET /api/media/<key>` for its images — the Worker asks the database whether a
+public story shows the image before it reads the bucket, so knowing or guessing a
+key gets nothing. Its filer reads it on two routes under the same Access-covered
+prefix: `GET /api/desk/stories/<share-id>` (your own copy) and
+`GET /api/desk/image/<key>` (an image one of your own stories shows). The story
+page tries the public route first and falls back to those. Every story filed
+before visibility existed is public (migration `0004`).
 
 Ownership is still recorded (`conversations.owner_email`). It is *provenance, not
-an access boundary* for reading, with one exception: you can only retract what you
-filed, and another filer's copy of the same link stays put. It never leaves the server on a read: it keys the
+an access boundary* for reading a public story. It is the boundary for three things: you can
+only delete what you filed, only switch your own copy between public and private, and only
+you can read your private copy. Another filer's copy of the same link stays put, with the
+visibility its own filer chose — while one copy is public, the link's permalink and images
+stay public. It never leaves the server on a read: it keys the
 upsert, scopes the desk's "your recent filings" query, and is returned by exactly
 one endpoint — `/api/desk/whoami`, to the person it belongs to. No listing carries an
 address, because `/api/sessions` answers anonymous visitors and a per-row address
@@ -150,6 +166,7 @@ backend/
 ├── local_server.py         # runs the same service off-Cloudflare (stdlib only)
 ├── test/test_decode.py     # network test: decode + parse a real share link
 ├── test/test_ownership.py  # offline contract test: all 3 repositories agree
+├── test/test_visibility_routes.py  # offline: private stories, on both routers
 ├── test/test_urls.py       # offline: the open-redirect guard
 ├── migrations/             # D1 migrations (0001_init.sql is the schema)
 ├── wrangler.jsonc          # Worker + D1 binding config
@@ -190,6 +207,8 @@ frontend/
 │       ├── CopyDesk.tsx        # the filing form + your recent filings
 │       ├── StoryLink.tsx       # one story rendered as a link
 │       ├── SessionReader.tsx   # reader with the Report/Chat toggle
+│       ├── Retract.tsx         # Delete, with its two-click confirmation
+│       ├── VisibilityControl.tsx # the Public/Private label and its switch
 │       ├── SourcesPanel.tsx    # a reply's sources, behind its ···
 │       ├── SourceIcon.tsx      # vendor mark, else a domain monogram
 │       └── AuthFlow.tsx        # email → code → verifying → confirmed
@@ -207,6 +226,7 @@ frontend/
 ├── export.test.mjs             # the static export carries no theme of its own
 ├── shell-contract/             # worker.js + the real site-shell in `wrangler dev`
 ├── layout.test.mjs             # every exported page fits a phone's screen width
+├── controls.test.mjs           # a filer's Delete and public/private controls, in Chrome
 ├── wrangler.jsonc              # routes, static assets, the SHELL binding
 ├── package.json
 └── tsconfig.json
@@ -239,7 +259,8 @@ cd frontend && npm run build && npm run test:export && SITE_THEMES_DIR=../../sit
 # on an export built with NEXT_PUBLIC_API_BASE='' (so the reader asks its own
 # origin): every page, a story with bare URLs and wide tables included, lays
 # out at exactly the screen width on a phone, upright and sideways (Google Chrome)
-cd frontend && NEXT_PUBLIC_API_BASE= npm run build && npm run test:layout
+# and, on that same export, a filer's Delete and public/private controls
+cd frontend && NEXT_PUBLIC_API_BASE= npm run build && npm run test:layout && npm run test:controls
 ```
 
 The shared site theme comes only from site-shell (`akshayDev17/site-themes`,

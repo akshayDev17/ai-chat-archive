@@ -11,11 +11,17 @@ Two things this file has to get right:
    https://developers.cloudflare.com/workers/languages/python/
 
 2. **Public reading, private filing.** The archive is a newspaper: the front
-   page and every story are readable by anyone, with no identity at all. The
-   only gated actions are filing copy (``POST /api/desk/ingest``), retracting it
-   (``DELETE /api/desk/sessions/<id>``) and seeing your own filings. So the
+   page and every public story are readable by anyone, with no identity at all.
+   The gated actions are filing copy (``POST /api/desk/ingest``), retracting it
+   (``DELETE /api/desk/sessions/<id>``), making it public or private
+   (``PATCH /api/desk/sessions/<id>``) and seeing your own filings. So the
    split is "public reads, private writes" — one rule, easy to
    check, and expressed as two contiguous blocks in :meth:`Default.fetch`.
+
+   A filer can keep a story *private*. The public block then answers as if it
+   did not exist — absent from the edition, 404 at its permalink, 404 for its
+   images — and its filer reads it in the protected block instead
+   (``GET /api/desk/stories/<id>``, ``GET /api/desk/image/<key>``).
 
    That split is enforced here, in the Worker, rather than in Cloudflare Access,
    for two reasons. Access application paths cannot contain query strings, and
@@ -25,14 +31,16 @@ Two things this file has to get right:
 
    Ownership survives as *provenance*: every row records who filed it, which
    drives the `source`/byline on the front page and the copy desk's "your
-   filings" list. It is not a boundary on *reading* — everyone reads the same
-   edition — but it is the boundary on retracting: you can only take back what
-   you filed.
+   filings" list. It is not a boundary on reading a *public* story — everyone
+   reads the same edition — but it is the boundary on retracting a story,
+   changing its visibility and reading a private one: all three are yours only
+   for what you filed.
 """
 
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import datetime, timezone
 
 from workers import Response, WorkerEntrypoint
@@ -44,9 +52,18 @@ from .chatgpt.proxy_fetcher import ProxyImageFetcher, ProxyShareFetcher, make_wo
 from .media_copier import copy_pending, retract_story
 from .r2_media_store import R2MediaStore
 from .repository import D1ConversationRepository
-from .serializers import conversation_detail, media_counts
-from .service import InvalidShareUrl, ShareService
-from .urls import desk_media_target, first_param, media_key_of, path_of, query_of, safe_next
+from .serializers import conversation_detail, media_cache_control, media_counts
+from .service import InvalidShareUrl, ShareService, requested_visibility
+from .urls import (
+    DESK_IMAGE_ROUTE,
+    DESK_STORY_ROUTE,
+    desk_media_target,
+    first_param,
+    media_key_of,
+    path_of,
+    query_of,
+    safe_next,
+)
 
 
 def _json(body: object, status: int = 200) -> Response:
@@ -122,8 +139,9 @@ class Default(WorkerEntrypoint):
             return await self._health()
 
         # -- public -----------------------------------------------------------
-        # Reading is entirely public: the edition is a newspaper, so every story
-        # and the front page itself are readable without an identity.
+        # Reading a public story needs no identity: the edition is a newspaper,
+        # so the front page and every public story are open to anyone. A private
+        # story is invisible to this whole block.
         if path.endswith("/api/sessions") and method == "GET":
             return await self._edition()
 
@@ -131,8 +149,8 @@ class Default(WorkerEntrypoint):
             return await self._read_story(path.rsplit("/", 1)[-1])
 
         if "/api/media/" in path and "/api/desk/" not in path and method == "GET":
-            # A story's images are as public as the story.
-            return await self._serve_media(media_key_of(path))
+            # A story's images are as public as the story — and no more.
+            return await self._serve_media(media_key_of(path), None)
 
         # -- protected --------------------------------------------------------
         # Everything below files copy (or asks who you are as a filer), so it
@@ -163,6 +181,15 @@ class Default(WorkerEntrypoint):
 
         if "/api/desk/sessions/" in path and method == "DELETE":
             return await self._retract(path.rsplit("/", 1)[-1], identity)
+
+        if "/api/desk/sessions/" in path and method == "PATCH":
+            return await self._set_visibility(request, path.rsplit("/", 1)[-1], identity)
+
+        if DESK_STORY_ROUTE in path and method == "GET":
+            return await self._read_own_story(path.rsplit("/", 1)[-1], identity)
+
+        if DESK_IMAGE_ROUTE in path and method == "GET":
+            return await self._serve_media(media_key_of(path, DESK_IMAGE_ROUTE), identity)
 
         media_target = desk_media_target(path)
         if media_target is not None:
@@ -224,34 +251,56 @@ class Default(WorkerEntrypoint):
         )
 
     async def _edition(self) -> Response:
-        """The front page: every filed story, from every filer."""
+        """The front page: every public story, from every filer."""
         return _json({"sessions": await self._repository().list_all()})
 
     async def _filings(self, identity) -> Response:
-        """What *you* filed — the copy desk showing your own recent work.
-
-        Barely different from :meth:`_edition` today, and that is the point: the
-        difference is the whole reason the owner column exists, and it is the
-        read that will matter once the desk lists only your drafts.
-        """
+        """What *you* filed — the copy desk showing your own work, public and
+        private, each row saying which."""
         sessions = await self._repository().list_recent(identity.email)
         return _json({"owner": identity.email, "sessions": sessions})
 
     async def _filed_by(self, share_id: str, identity) -> Response:
         """Whether *you* filed this story, and how its image copies stand.
 
-        The reader uses it to offer the filer a retraction and a link to the
-        story's images. A yes/no rather than the owner's address: the story
-        itself is public, and the answer is only ever about the person asking.
+        The reader uses it to offer the filer the story's controls — delete,
+        public or private — and a link to its images. A yes/no rather than the
+        owner's address: the answer is only ever about the person asking, and
+        says nothing about anyone else's copy.
         """
         story = await self._repository().media_for(share_id, identity.email)
         return _json(
             {
                 "id": share_id,
                 "yours": story is not None,
+                "visibility": story["visibility"] if story else None,
                 "images": media_counts(story["images"]) if story else None,
             }
         )
+
+    async def _set_visibility(self, request, share_id: str, identity) -> Response:
+        """Make one of your own stories public or private.
+
+        Scoped to the caller's copy, like :meth:`_retract`: a story you never
+        filed is a 404 rather than a 403, and someone else's copy of the same
+        share link keeps the visibility its own filer chose.
+        """
+        try:
+            visibility = requested_visibility(await request.json(), required=True)
+        except ValueError as exc:
+            return _json({"error": str(exc)}, status=400)
+        except Exception:
+            return _json({"error": "Invalid JSON body"}, status=400)
+        if not await self._repository().set_visibility(share_id, identity.email, visibility):
+            return _json({"error": "You have no filed story with that id"}, status=404)
+        return _json({"id": share_id, "visibility": visibility})
+
+    async def _read_own_story(self, share_id: str, identity) -> Response:
+        """Your own copy of a story — the only way to read a private one."""
+        conversation = await self._repository().get(share_id, identity.email)
+        if conversation is None:
+            return _json({"error": "You have no filed story with that id"}, status=404)
+        return _json(conversation_detail(conversation, for_owner=True))
 
     async def _retract(self, share_id: str, identity) -> Response:
         """Take one of your own stories out of the edition.
@@ -265,18 +314,26 @@ class Default(WorkerEntrypoint):
             return _json({"error": "You have no filed story with that id"}, status=404)
         return _json({"id": share_id, "retracted": True})
 
-    async def _serve_media(self, key: str | None) -> Response:
+    async def _serve_media(self, key: str | None, identity) -> Response:
+        """One copied image — to anyone (``identity`` None) or to its filer.
+
+        The bucket is not asked until the database says the caller may see the
+        image: publicly, only a public story's; on the desk route, only the
+        caller's own. So a private story's key answers 404 to everyone else,
+        however it was come by.
+        """
         if key is None:
+            return _json({"error": "Not found"}, status=404)
+        owner = identity.email if identity is not None else None
+        if not await self._repository().media_key_readable(key, owner):
             return _json({"error": "Not found"}, status=404)
         found = await self._media_store().get(key)
         if found is None:
             return _json({"error": "Not found"}, status=404)
         data, content_type = found
-        # Not `immutable`: a key is a place in a story, and re-filing can put a
-        # different picture there.
         return Response(
             data,
-            headers={"content-type": content_type, "cache-control": "public, max-age=86400"},
+            headers={"content-type": content_type, "cache-control": media_cache_control(owner)},
         )
 
     async def _desk_media(self, target, method: str, identity) -> Response:
@@ -323,10 +380,14 @@ class Default(WorkerEntrypoint):
             return _json({"error": "Missing share_url"}, status=400)
 
         try:
+            visibility = requested_visibility(body)
             conversation = await self._service().ingest(share_url)
-            # Stamp ownership here — the parser cannot know it, and the
-            # repository refuses to store an unowned row.
-            await self._repository().upsert(conversation.owned_by(identity.email))
+            # Stamp ownership and the filer's choice here — the parser cannot
+            # know either, and the repository refuses to store an unowned row.
+            await self._repository().upsert(
+                replace(conversation.owned_by(identity.email), visibility=visibility)
+            )
+            filed = await self._repository().media_for(conversation.share_id, identity.email)
         except InvalidShareUrl as exc:
             return _json({"error": str(exc)}, status=400)
         except Exception as exc:  # fetch/parse failures -> 4xx for the caller
@@ -341,5 +402,6 @@ class Default(WorkerEntrypoint):
                 "citations": len(conversation.citations),
                 "images": sum(len(m.media) for m in conversation.messages),
                 "owner": identity.email,
+                "visibility": filed["visibility"],
             }
         )

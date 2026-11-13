@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from .models import Conversation, Media, Message, Source
+from .urls import DESK_IMAGE_ROUTE, PUBLIC_MEDIA_ROUTE
 
 
 def _utf16_offsets(content: str, spans: tuple[tuple[int, int], ...]) -> list[list[int]]:
@@ -50,7 +51,7 @@ def _source(source: Source, content: str) -> dict:
     }
 
 
-def _media(media: Media, content: str) -> dict:
+def _media(media: Media, content: str, media_route: str) -> dict:
     # The same code-point → UTF-16 conversion as source spans, for the same
     # reason: the reader matches each image to its tag by offset.
     ((tag_start, _),) = _utf16_offsets(content, ((media.tag_start, media.tag_start),))
@@ -59,21 +60,34 @@ def _media(media: Media, content: str) -> dict:
         "ordinal": media.ordinal,
         # Only an image already in R2 has somewhere to point. Until then the
         # reader shows nothing rather than hotlinking images.openai.com.
-        "src": f"/api/media/{media.r2_key}" if media.status == "copied" and media.r2_key else None,
+        "src": f"{media_route}{media.r2_key}" if media.status == "copied" and media.r2_key else None,
     }
 
 
-def _message(message: Message) -> dict:
+def _message(message: Message, media_route: str) -> dict:
     return {
         "role": message.role,
         "content": message.content,
         "sources": [_source(s, message.content) for s in message.sources],
-        "media": [_media(m, message.content) for m in message.media],
+        "media": [_media(m, message.content, media_route) for m in message.media],
     }
 
 
-def conversation_detail(conversation: Conversation) -> dict:
-    """The full payload the reader view needs: report + transcript + citations."""
+def conversation_detail(conversation: Conversation, for_owner: bool = False) -> dict:
+    """The full payload the reader view needs: report + transcript + citations.
+
+    ``for_owner`` is the filer reading their own copy through the desk: the
+    payload then says whether it is public or private, and its images point at
+    the filer's own image route — the only one that serves a private story's.
+    """
+    media_route = DESK_IMAGE_ROUTE if for_owner else PUBLIC_MEDIA_ROUTE
+    detail = _detail(conversation, media_route)
+    if for_owner:
+        detail["visibility"] = conversation.visibility
+    return detail
+
+
+def _detail(conversation: Conversation, media_route: str) -> dict:
     return {
         "id": conversation.share_id,
         "title": conversation.title,
@@ -82,7 +96,7 @@ def conversation_detail(conversation: Conversation) -> dict:
         "citations": [
             {"n": c.index, "title": c.title, "url": c.url} for c in conversation.citations
         ],
-        "messages": [_message(m) for m in conversation.messages],
+        "messages": [_message(m, media_route) for m in conversation.messages],
     }
 
 
@@ -101,3 +115,13 @@ def media_counts(images: list[dict]) -> dict | None:
         "failed": statuses.count("failed"),
         "pending": statuses.count("pending") + statuses.count("copying"),
     }
+
+
+def media_cache_control(owner_email: str | None) -> str:
+    """The ``Cache-Control`` of a served image.
+
+    Not `immutable` either way: a key is a place in a story, and re-filing can
+    put a different picture there. An image served to its filer over the desk
+    route may be a private story's, so only their own browser may keep it.
+    """
+    return "private, max-age=3600" if owner_email else "public, max-age=86400"

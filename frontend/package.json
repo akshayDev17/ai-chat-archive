@@ -13,7 +13,8 @@
     "test:worker": "node --test worker.test.mjs",
     "test:export": "node --test export.test.mjs",
     "test:shell": "node --test shell-contract/contract.test.mjs",
-    "test:layout": "node --test layout.test.mjs"
+    "test:layout": "node --test layout.test.mjs",
+    "test:controls": "node --test controls.test.mjs"
   },
   "dependencies": {
     "lucide-react": "1.55.0",

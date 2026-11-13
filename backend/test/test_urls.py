@@ -22,6 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from chat_archive.urls import (  # noqa: E402
     DEFAULT_AFTER_SIGN_IN,
+    DESK_IMAGE_ROUTE,
     desk_media_target,
     first_param,
     media_key_of,
@@ -109,6 +110,21 @@ class TestMediaPaths(unittest.TestCase):
                     "/api/sessions/x"):
             with self.subTest(path=bad):
                 self.assertIsNone(media_key_of(bad))
+
+    def test_the_desk_image_route_takes_the_same_keys(self):
+        key = "chat-archives/6adf3276-41cc-83e8-8bb7-669b6f0a4748/47780937-aaaa-bbbb-cccc-0123456789ab/01.jpg"
+        self.assertEqual(media_key_of(f"/api/desk/image/{key}", DESK_IMAGE_ROUTE), key)
+        self.assertEqual(media_key_of(f"/api/desk/image/{KEY}", DESK_IMAGE_ROUTE), KEY)
+        for bad in (
+            "/api/desk/image/chat-archives/../secret/01.jpg",
+            "/api/desk/image/img/abc.jpg",
+            f"/api/media/{KEY}",
+        ):
+            with self.subTest(path=bad):
+                self.assertIsNone(media_key_of(bad, DESK_IMAGE_ROUTE))
+
+    def test_a_desk_image_path_is_not_a_desk_media_target(self):
+        self.assertIsNone(desk_media_target(f"/api/desk/image/{KEY}"))
 
     def test_desk_media_targets(self):
         self.assertEqual(desk_media_target("/api/desk/media"), (None, None))

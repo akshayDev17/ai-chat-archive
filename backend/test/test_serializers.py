@@ -128,6 +128,28 @@ class TestMedia(unittest.TestCase):
             ],
         )
 
+    def test_the_owners_copy_says_its_visibility_and_points_at_the_desk_image_route(self):
+        """A private story's images are served on the desk route only."""
+        conversation = Conversation(
+            share_id="x",
+            title="t",
+            visibility="private",
+            messages=[
+                Message(
+                    role="assistant",
+                    content="a",
+                    media=[Media(tag_start=0, ordinal=0, content_url="https://i/1", status="copied", r2_key="img/a.jpg")],
+                )
+            ],
+        )
+        mine = conversation_detail(conversation, for_owner=True)
+        self.assertEqual(mine["visibility"], "private")
+        self.assertEqual(mine["messages"][0]["media"][0]["src"], "/api/desk/image/img/a.jpg")
+
+        public = conversation_detail(conversation)
+        self.assertNotIn("visibility", public)
+        self.assertEqual(public["messages"][0]["media"][0]["src"], "/api/media/img/a.jpg")
+
     def test_media_tag_start_is_utf16(self):
         text = f"{FLAG} Look: <AsyncImage query=\"q\"/>"
         start = text.index("<AsyncImage")

@@ -476,7 +476,10 @@ class MediaContract:
 
         self.assertEqual(
             summary,
-            [{"id": "share-a", "title": "Mine", "total": 3, "copied": 1, "failed": 1, "pending": 1}],
+            [{
+                "id": "share-a", "title": "Mine", "visibility": "public",
+                "total": 3, "copied": 1, "failed": 1, "pending": 1,
+            }],
         )
 
     def test_media_for_lists_each_image_with_its_status(self):
@@ -605,12 +608,194 @@ class MediaContract:
 # ------------------------------------------------------------ implementations
 
 
-class TestMemoryRepository(OwnershipContract, MediaContract, unittest.TestCase):
+class VisibilityContract:
+    """Public or private: a private story exists for its filer and nobody else.
+
+    Every unscoped read is a public one, so each must leave a private story out;
+    every owner-scoped read and write must still reach it.
+    """
+
+    def _private(self, share_id: str, title: str, owner: str, urls=()) -> None:
+        asyncio.run(
+            self.repo.upsert(replace(illustrated(share_id, title, owner, list(urls)), visibility="private"))
+        )
+
+    def _copy_all(self, share_id: str, owner: str) -> list[str]:
+        """Mark every image of one filing copied; returns their keys."""
+        keys = []
+        for row in asyncio.run(self.repo.claim_media(10, T0, T0_MINUS_4, only=(owner, share_id))):
+            key = f"{row['object_path']}.jpg"
+            asyncio.run(self.repo.finish_media(row["id"], key, "image/jpeg"))
+            keys.append(key)
+        return keys
+
+    # -- filing --------------------------------------------------------------
+
+    def test_a_story_filed_without_saying_is_public(self):
+        asyncio.run(self.repo.upsert(conversation("share-a", "A story", AKSHAY)))
+        self.assertEqual(asyncio.run(self.repo.get("share-a", AKSHAY)).visibility, "public")
+        self.assertEqual([s["id"] for s in asyncio.run(self.repo.list_all())], ["share-a"])
+
+    def test_a_story_can_be_filed_private(self):
+        self._private("share-a", "Mine alone", AKSHAY)
+        self.assertEqual(asyncio.run(self.repo.get("share-a", AKSHAY)).visibility, "private")
+
+    def test_filing_refuses_an_unknown_visibility(self):
+        with self.assertRaises(ValueError):
+            asyncio.run(
+                self.repo.upsert(replace(conversation("share-a", "A story", AKSHAY), visibility="secret"))
+            )
+        self.assertFalse(asyncio.run(self.repo.is_filed("share-a")))
+
+    def test_filing_again_without_saying_keeps_a_story_private(self):
+        self._private("share-a", "Mine alone", AKSHAY)
+        asyncio.run(self.repo.upsert(conversation("share-a", "Mine alone, again", AKSHAY)))
+        self.assertEqual(asyncio.run(self.repo.get("share-a", AKSHAY)).visibility, "private")
+        self.assertEqual(asyncio.run(self.repo.list_all()), [])
+
+    def test_filing_again_with_a_choice_applies_it(self):
+        self._private("share-a", "Mine alone", AKSHAY)
+        asyncio.run(
+            self.repo.upsert(replace(conversation("share-a", "Now for all", AKSHAY), visibility="public"))
+        )
+        self.assertEqual([s["id"] for s in asyncio.run(self.repo.list_all())], ["share-a"])
+
+    # -- a private story is absent from every public read --------------------
+
+    def test_a_private_story_is_not_in_the_edition(self):
+        asyncio.run(self.repo.upsert(conversation("share-a", "For all", AKSHAY)))
+        self._private("share-b", "Mine alone", AKSHAY)
+        self.assertEqual([s["id"] for s in asyncio.run(self.repo.list_all())], ["share-a"])
+
+    def test_a_private_story_is_absent_at_its_public_permalink(self):
+        self._private("share-a", "Mine alone", AKSHAY)
+        self.assertIsNone(asyncio.run(self.repo.get("share-a")))
+
+    def test_another_reader_cannot_reach_a_private_story(self):
+        self._private("share-a", "Mine alone", AKSHAY, [img(1)])
+        self.assertIsNone(asyncio.run(self.repo.get("share-a", GUEST)))
+        self.assertIsNone(asyncio.run(self.repo.media_for("share-a", GUEST)))
+        self.assertEqual(asyncio.run(self.repo.list_recent(GUEST)), [])
+        self.assertEqual(asyncio.run(self.repo.media_summary(GUEST)), [])
+
+    # -- its owner still has it ----------------------------------------------
+
+    def test_the_owner_reads_their_private_story(self):
+        self._private("share-a", "Mine alone", AKSHAY)
+        mine = asyncio.run(self.repo.get("share-a", AKSHAY))
+        self.assertEqual((mine.title, mine.report), ("Mine alone", "# Mine alone\n\nA report."))
+
+    def test_the_owners_filings_list_private_and_public_and_say_which(self):
+        asyncio.run(self.repo.upsert(conversation("share-a", "For all", AKSHAY)))
+        self._private("share-b", "Mine alone", AKSHAY)
+        mine = {s["id"]: s["visibility"] for s in asyncio.run(self.repo.list_recent(AKSHAY))}
+        self.assertEqual(mine, {"share-a": "public", "share-b": "private"})
+
+    def test_media_listings_say_whether_the_story_is_private(self):
+        self._private("share-a", "Mine alone", AKSHAY, [img(1)])
+        self.assertEqual(asyncio.run(self.repo.media_summary(AKSHAY))[0]["visibility"], "private")
+        self.assertEqual(asyncio.run(self.repo.media_for("share-a", AKSHAY))["visibility"], "private")
+
+    # -- changing it ---------------------------------------------------------
+
+    def test_the_owner_can_make_a_story_private_and_public_again(self):
+        asyncio.run(self.repo.upsert(conversation("share-a", "A story", AKSHAY)))
+
+        self.assertTrue(asyncio.run(self.repo.set_visibility("share-a", AKSHAY, "private")))
+        self.assertIsNone(asyncio.run(self.repo.get("share-a")))
+        self.assertEqual(asyncio.run(self.repo.list_all()), [])
+
+        self.assertTrue(asyncio.run(self.repo.set_visibility("share-a", AKSHAY, "public")))
+        self.assertIsNotNone(asyncio.run(self.repo.get("share-a")))
+        self.assertEqual([s["id"] for s in asyncio.run(self.repo.list_all())], ["share-a"])
+
+    def test_nobody_else_can_change_a_storys_visibility(self):
+        asyncio.run(self.repo.upsert(conversation("share-a", "Akshay's story", AKSHAY)))
+        self.assertFalse(asyncio.run(self.repo.set_visibility("share-a", GUEST, "private")))
+        self.assertIsNotNone(asyncio.run(self.repo.get("share-a")), "the story must still be public")
+
+        self._private("share-b", "Mine alone", AKSHAY)
+        self.assertFalse(asyncio.run(self.repo.set_visibility("share-b", GUEST, "public")))
+        self.assertIsNone(asyncio.run(self.repo.get("share-b")), "the story must still be private")
+
+    def test_set_visibility_refuses_an_empty_owner_or_an_unknown_value(self):
+        asyncio.run(self.repo.upsert(conversation("share-a", "A story", AKSHAY)))
+        with self.assertRaises(ValueError):
+            asyncio.run(self.repo.set_visibility("share-a", "", "private"))
+        with self.assertRaises(ValueError):
+            asyncio.run(self.repo.set_visibility("share-a", AKSHAY, "secret"))
+        self.assertEqual(asyncio.run(self.repo.get("share-a", AKSHAY)).visibility, "public")
+
+    # -- two filers of one link ----------------------------------------------
+
+    def test_one_filers_private_copy_does_not_hide_anothers_public_copy(self):
+        asyncio.run(self.repo.upsert(conversation("shared", "Guest's public copy", GUEST)))
+        self._private("shared", "Akshay's private copy", AKSHAY)
+
+        self.assertEqual(asyncio.run(self.repo.get("shared")).title, "Guest's public copy")
+        self.assertEqual(
+            [s["title"] for s in asyncio.run(self.repo.list_all())], ["Guest's public copy"]
+        )
+        self.assertEqual(asyncio.run(self.repo.get("shared", AKSHAY)).title, "Akshay's private copy")
+
+    def test_a_private_copy_still_counts_as_filed(self):
+        self._private("share-a", "Mine alone", AKSHAY)
+        self.assertTrue(asyncio.run(self.repo.is_filed("share-a")))
+        asyncio.run(self.repo.delete("share-a", AKSHAY))
+        self.assertFalse(asyncio.run(self.repo.is_filed("share-a")))
+
+    # -- images --------------------------------------------------------------
+
+    def test_a_public_storys_image_is_readable_by_anyone(self):
+        asyncio.run(self.repo.upsert(illustrated("share-a", "For all", AKSHAY, [img(1)])))
+        (key,) = self._copy_all("share-a", AKSHAY)
+        self.assertTrue(asyncio.run(self.repo.media_key_readable(key)))
+        self.assertTrue(asyncio.run(self.repo.media_key_readable(key, AKSHAY)))
+
+    def test_a_private_storys_image_is_readable_by_its_owner_only(self):
+        self._private("share-a", "Mine alone", AKSHAY, [img(1)])
+        (key,) = self._copy_all("share-a", AKSHAY)
+        self.assertFalse(asyncio.run(self.repo.media_key_readable(key)), "public route")
+        self.assertFalse(asyncio.run(self.repo.media_key_readable(key, GUEST)), "another reader")
+        self.assertTrue(asyncio.run(self.repo.media_key_readable(key, AKSHAY)), "the owner")
+
+    def test_the_desk_route_serves_only_your_own_images(self):
+        """Even a public story's image is not *yours* unless you filed it."""
+        asyncio.run(self.repo.upsert(illustrated("share-a", "For all", AKSHAY, [img(1)])))
+        (key,) = self._copy_all("share-a", AKSHAY)
+        self.assertFalse(asyncio.run(self.repo.media_key_readable(key, GUEST)))
+
+    def test_making_a_story_private_withdraws_its_images(self):
+        asyncio.run(self.repo.upsert(illustrated("share-a", "A story", AKSHAY, [img(1)])))
+        (key,) = self._copy_all("share-a", AKSHAY)
+        asyncio.run(self.repo.set_visibility("share-a", AKSHAY, "private"))
+        self.assertFalse(asyncio.run(self.repo.media_key_readable(key)))
+
+    def test_a_shared_image_stays_public_while_one_copy_is_public(self):
+        """Two filers of one link share its image folder."""
+        asyncio.run(self.repo.upsert(illustrated("shared", "Public copy", GUEST, [img(1)])))
+        (key,) = self._copy_all("shared", GUEST)
+        self._private("shared", "Private copy", AKSHAY, [img(1)])
+
+        self.assertTrue(asyncio.run(self.repo.media_key_readable(key)))
+        asyncio.run(self.repo.set_visibility("shared", GUEST, "private"))
+        self.assertFalse(asyncio.run(self.repo.media_key_readable(key)))
+
+    def test_a_key_no_story_points_at_is_readable_by_nobody(self):
+        asyncio.run(self.repo.upsert(illustrated("share-a", "A story", AKSHAY, [img(1)])))
+        stray = "chat-archives/share-a/msg-1/99.jpg"
+        self.assertFalse(asyncio.run(self.repo.media_key_readable(stray)))
+        self.assertFalse(asyncio.run(self.repo.media_key_readable(stray, AKSHAY)))
+
+
+class TestMemoryRepository(OwnershipContract, MediaContract, VisibilityContract, unittest.TestCase):
     def make_repository(self):
         return MemoryConversationRepository()
 
 
-class TestSqliteRepository(OwnershipContract, MediaContract, NoOrphanedRows, unittest.TestCase):
+class TestSqliteRepository(
+    OwnershipContract, MediaContract, VisibilityContract, NoOrphanedRows, unittest.TestCase
+):
     def make_repository(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
@@ -620,7 +805,9 @@ class TestSqliteRepository(OwnershipContract, MediaContract, NoOrphanedRows, uni
         return self.repo._conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
 
 
-class TestD1Repository(OwnershipContract, MediaContract, NoOrphanedRows, unittest.TestCase):
+class TestD1Repository(
+    OwnershipContract, MediaContract, VisibilityContract, NoOrphanedRows, unittest.TestCase
+):
     """Runs the D1 repository's real SQL against a SQLite-backed fake binding."""
 
     def make_repository(self):
@@ -732,6 +919,63 @@ class TestMediaPathMigration(unittest.TestCase):
         asyncio.run(repo.upsert(illustrated("share-a", "Story", AKSHAY, [img(1)])))
         (image,) = asyncio.run(repo.media_for("share-a", AKSHAY))["images"]
         self.assertEqual(image["object_path"], "chat-archives/share-a/msg-1/01")
+
+
+class TestVisibilityMigration(unittest.TestCase):
+    """0004 on a database that already holds stories: every one stays public."""
+
+    EARLIER = ("0001_init.sql", "0002_media.sql", "0003_media_paths.sql")
+    OLD_ROWS = """
+        INSERT INTO conversations (id, owner_email, external_id, title, created_at, updated_at)
+        VALUES ('c1', 'a@x.com', 'share-a', 'Old one', '2026-10-26', '2026-10-26'),
+               ('c2', 'b@x.com', 'share-b', 'Old two', '2026-10-27', '2026-10-27');
+        INSERT INTO media (id, conversation_id, message_seq, tag_start, ordinal, content_url,
+                           status, r2_key, content_type, object_path)
+        VALUES ('m1', 'c1', 1, 0, 0, 'https://i/1', 'copied',
+                'chat-archives/share-a/msg-1/01.jpg', 'image/jpeg', 'chat-archives/share-a/msg-1/01');
+    """
+
+    def test_existing_rows_become_public(self):
+        conn = sqlite3.connect(":memory:")
+        for name in self.EARLIER:
+            conn.executescript((BACKEND / "migrations" / name).read_text())
+        conn.executescript(self.OLD_ROWS)
+
+        conn.executescript((BACKEND / "migrations" / "0004_visibility.sql").read_text())
+
+        self.assertEqual(
+            conn.execute("SELECT external_id, visibility FROM conversations ORDER BY id").fetchall(),
+            [("share-a", "public"), ("share-b", "public")],
+        )
+
+    def test_the_column_takes_only_the_two_values(self):
+        conn = sqlite3.connect(":memory:")
+        for migration in sorted((BACKEND / "migrations").glob("*.sql")):
+            conn.executescript(migration.read_text())
+        with self.assertRaises(sqlite3.IntegrityError):
+            conn.execute(
+                "INSERT INTO conversations (id, owner_email, external_id, created_at, updated_at, visibility) "
+                "VALUES ('c1', 'a@x.com', 'share-a', 'now', 'now', 'secret')"
+            )
+
+    def test_the_local_sqlite_database_upgrades_itself_and_stays_public(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        path = str(Path(tmp.name) / "archive.db")
+        old = sqlite3.connect(path)
+        for name in self.EARLIER:
+            old.executescript((BACKEND / "migrations" / name).read_text())
+        old.executescript(self.OLD_ROWS)
+        old.commit()
+        old.close()
+
+        repo = SqliteConversationRepository(path)
+
+        self.assertEqual({s["id"] for s in asyncio.run(repo.list_all())}, {"share-a", "share-b"})
+        self.assertEqual(asyncio.run(repo.get("share-a")).title, "Old one")
+        self.assertTrue(asyncio.run(repo.media_key_readable("chat-archives/share-a/msg-1/01.jpg")))
+        self.assertTrue(asyncio.run(repo.set_visibility("share-a", "a@x.com", "private")))
+        self.assertEqual([s["id"] for s in asyncio.run(repo.list_all())], ["share-b"])
 
 
 if __name__ == "__main__":

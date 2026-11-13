@@ -30,7 +30,15 @@ import uuid
 from pathlib import Path
 from datetime import datetime, timezone
 
-from .models import Citation, Conversation, Message, Source, normalize_email
+from .models import (
+    PUBLIC,
+    Citation,
+    Conversation,
+    Message,
+    Source,
+    checked_visibility,
+    normalize_email,
+)
 from .ports import ConversationRepository
 from .repository import (
     MEDIA_CLAIM_ONE_STORY_SQL,
@@ -40,6 +48,8 @@ from .repository import (
     MEDIA_FINISH_SQL,
     MEDIA_FOR_CONVERSATION_SQL,
     MEDIA_INSERT_SQL,
+    MEDIA_KEY_OWNED_SQL,
+    MEDIA_KEY_PUBLIC_SQL,
     MEDIA_RECLAIM_SQL,
     MEDIA_RETRY_SQL,
     RECLAIM_ERROR,
@@ -74,7 +84,8 @@ CREATE TABLE IF NOT EXISTS conversations (
   created_at  TEXT NOT NULL,
   updated_at  TEXT NOT NULL,
   source      TEXT DEFAULT 'chatgpt',
-  report_id   TEXT
+  report_id   TEXT,
+  visibility  TEXT NOT NULL DEFAULT 'public' CHECK (visibility IN ('public', 'private'))
 );
 CREATE TABLE IF NOT EXISTS messages (
   id              TEXT PRIMARY KEY,
@@ -133,6 +144,7 @@ CREATE INDEX IF NOT EXISTS idx_media_object_path ON media(object_path);
 CREATE INDEX IF NOT EXISTS idx_media_message ON media(conversation_id, message_seq, tag_start, ordinal);
 CREATE INDEX IF NOT EXISTS idx_media_status ON media(status, claimed_at);
 CREATE INDEX IF NOT EXISTS idx_media_content_url ON media(content_url);
+CREATE INDEX IF NOT EXISTS idx_media_r2_key ON media(r2_key);
 """
 
 
@@ -153,6 +165,14 @@ class SqliteConversationRepository(ConversationRepository):
     def _migrate(self) -> None:
         """Bring an older local database up to the current schema, keeping rows."""
         self._migrate_owner()
+        if self._columns() and "visibility" not in self._columns():
+            # Mirrors migrations/0004_visibility.sql: every existing story stays
+            # public. (Its index is in _SCHEMA — the media table may not exist yet.)
+            self._conn.execute(
+                "ALTER TABLE conversations ADD COLUMN visibility TEXT NOT NULL "
+                "DEFAULT 'public' CHECK (visibility IN ('public', 'private'))"
+            )
+            self._conn.commit()
         media = self._conn.execute("PRAGMA table_info(media)").fetchall()
         if media and "object_path" not in {row[1] for row in media}:
             # Mirrors migrations/0003_media_paths.sql.
@@ -205,6 +225,9 @@ class SqliteConversationRepository(ConversationRepository):
         owner = normalize_email(conversation.owner_email)
         if not owner:
             raise ValueError("Refusing to store a conversation with no owner_email.")
+        visibility = conversation.visibility
+        if visibility is not None:
+            checked_visibility(visibility)
 
         with self._lock:
             now = datetime.now(timezone.utc).isoformat()
@@ -228,6 +251,12 @@ class SqliteConversationRepository(ConversationRepository):
                     "UPDATE conversations SET title = ?, updated_at = ? WHERE id = ?",
                     (conversation.title, now, conv_id),
                 )
+                # Filed again without saying: the story keeps what it had.
+                if visibility is not None:
+                    self._conn.execute(
+                        "UPDATE conversations SET visibility = ? WHERE id = ?",
+                        (visibility, conv_id),
+                    )
                 self._conn.execute("DELETE FROM messages WHERE conversation_id = ?", (conv_id,))
                 self._conn.execute("DELETE FROM reports WHERE conversation_id = ?", (conv_id,))
                 self._conn.execute("DELETE FROM sources WHERE conversation_id = ?", (conv_id,))
@@ -235,8 +264,8 @@ class SqliteConversationRepository(ConversationRepository):
             else:
                 self._conn.execute(
                     "INSERT INTO conversations "
-                    "(id, owner_email, external_id, title, created_at, updated_at, source) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    "(id, owner_email, external_id, title, created_at, updated_at, source, visibility) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         conv_id,
                         owner,
@@ -245,6 +274,7 @@ class SqliteConversationRepository(ConversationRepository):
                         now,
                         now,
                         "chatgpt",
+                        visibility or PUBLIC,
                     ),
                 )
 
@@ -332,27 +362,50 @@ class SqliteConversationRepository(ConversationRepository):
             self._conn.commit()
         return True
 
+    async def set_visibility(self, share_id: str, owner_email: str, visibility: str) -> bool:
+        owner = normalize_email(owner_email)
+        if not owner:
+            raise ValueError("set_visibility requires an owner_email.")
+        checked_visibility(visibility)
+
+        with self._lock:
+            changed = self._conn.execute(
+                "UPDATE conversations SET visibility = ? WHERE owner_email = ? AND external_id = ?",
+                (visibility, owner, share_id),
+            ).rowcount
+            self._conn.commit()
+        return changed > 0
+
+    async def is_filed(self, share_id: str) -> bool:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT 1 FROM conversations WHERE external_id = ? LIMIT 1", (share_id,)
+            ).fetchone()
+        return row is not None
+
     async def get(self, share_id: str, owner_email: str | None = None) -> Conversation | None:
         owner = normalize_email(owner_email)
 
         with self._lock:
             if owner:
                 row = self._conn.execute(
-                    "SELECT id, title, owner_email FROM conversations "
+                    "SELECT id, title, owner_email, visibility FROM conversations "
                     "WHERE external_id = ? AND owner_email = ?",
                     (share_id, owner),
                 ).fetchone()
             else:
+                # The public lookup: a private copy is never the one that answers.
                 row = self._conn.execute(
-                    "SELECT id, title, owner_email FROM conversations "
-                    "WHERE external_id = ? ORDER BY created_at DESC LIMIT 1",
+                    "SELECT id, title, owner_email, visibility FROM conversations "
+                    "WHERE external_id = ? AND visibility = 'public' "
+                    "ORDER BY created_at DESC LIMIT 1",
                     (share_id,),
                 ).fetchone()
 
             if not row:
                 return None
 
-            conv_id, title, stored_owner = row
+            conv_id, title, stored_owner, visibility = row
             messages = self._conn.execute(
                 "SELECT seq, role, content FROM messages WHERE conversation_id = ? ORDER BY seq",
                 (conv_id,),
@@ -398,10 +451,11 @@ class SqliteConversationRepository(ConversationRepository):
             report=report_row[0] if report_row else None,
             citations=citations,
             owner_email=stored_owner,
+            visibility=visibility,
         )
 
     async def list_all(self, limit: int = 200) -> list[dict]:
-        """The public edition: every filed story, newest first, no owner filter.
+        """The public edition: every public story, newest first, no owner filter.
 
         ``owner_email`` is deliberately not selected — see the D1 implementation
         for why.
@@ -411,6 +465,7 @@ class SqliteConversationRepository(ConversationRepository):
                 "SELECT c.external_id AS id, c.title, c.created_at, c.source, r.markdown "
                 "FROM conversations c "
                 "LEFT JOIN reports r ON r.conversation_id = c.id "
+                "WHERE c.visibility = 'public' "
                 "ORDER BY c.created_at DESC LIMIT ?",
                 (limit,),
             ).fetchall()
@@ -426,7 +481,7 @@ class SqliteConversationRepository(ConversationRepository):
 
         with self._lock:
             rows = self._conn.execute(
-                "SELECT c.external_id AS id, c.title, c.created_at, c.source, r.markdown "
+                "SELECT c.external_id AS id, c.title, c.created_at, c.source, c.visibility, r.markdown "
                 "FROM conversations c "
                 "LEFT JOIN reports r ON r.conversation_id = c.id "
                 "WHERE c.owner_email = ? "
@@ -434,7 +489,10 @@ class SqliteConversationRepository(ConversationRepository):
                 (owner, limit),
             ).fetchall()
         return [
-            {"id": r[0], "title": r[1], "created_at": r[2], "source": r[3], "markdown": r[4]}
+            {
+                "id": r[0], "title": r[1], "created_at": r[2], "source": r[3],
+                "visibility": r[4], "markdown": r[5],
+            }
             for r in rows
         ]
 
@@ -445,7 +503,8 @@ class SqliteConversationRepository(ConversationRepository):
         if not owner:
             raise ValueError("media operations require an owner_email.")
         return self._conn.execute(
-            "SELECT id, title FROM conversations WHERE owner_email = ? AND external_id = ?",
+            "SELECT id, title, visibility FROM conversations "
+            "WHERE owner_email = ? AND external_id = ?",
             (owner, share_id),
         ).fetchone()
 
@@ -462,7 +521,12 @@ class SqliteConversationRepository(ConversationRepository):
             if not conv:
                 return None
             rows = _dicts(self._conn.execute(MEDIA_FOR_CONVERSATION_SQL, (conv[0],)))
-        return {"id": share_id, "title": conv[1], "images": [media_image(r) for r in rows]}
+        return {
+            "id": share_id,
+            "title": conv[1],
+            "visibility": conv[2],
+            "images": [media_image(r) for r in rows],
+        }
 
     async def retry_failed_media(self, share_id: str, owner_email: str) -> int | None:
         with self._lock:
@@ -510,3 +574,12 @@ class SqliteConversationRepository(ConversationRepository):
         with self._lock:
             rows = self._conn.execute(REFERENCED_KEYS_SQL, (json.dumps(keys),)).fetchall()
         return {r[0] for r in rows}
+
+    async def media_key_readable(self, key: str, owner_email: str | None = None) -> bool:
+        owner = normalize_email(owner_email)
+        with self._lock:
+            if owner:
+                row = self._conn.execute(MEDIA_KEY_OWNED_SQL, (key, owner)).fetchone()
+            else:
+                row = self._conn.execute(MEDIA_KEY_PUBLIC_SQL, (key,)).fetchone()
+        return row is not None

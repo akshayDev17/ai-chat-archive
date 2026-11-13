@@ -1,10 +1,12 @@
 import type {
+  Filing,
   IngestResult,
   MediaFiling,
   MediaStory,
   Session,
   SessionDetail,
   SessionListResponse,
+  Visibility,
   WhoAmI,
 } from '@/types';
 import type { MediaCounts } from '@/lib/media';
@@ -44,7 +46,7 @@ export const SIGN_IN_RETRY_DELAY_MS = 250;
  * siblings, carrying the same cookies, succeed: the Worker's identity lookup
  * sometimes comes back empty. One stray 401 must not flip the masthead to
  * "Sign in", so a 401 is asked again once, after a short pause, before it is
- * believed. A retried POST or DELETE is safe: the Worker checks identity
+ * believed. A retried POST, PATCH or DELETE is safe: the Worker checks identity
  * before doing anything, so a 401 means nothing was done.
  */
 async function fetchRetryingSignIn(url: string, init: RequestInit): Promise<Response> {
@@ -82,13 +84,19 @@ export async function whoami(): Promise<string | null> {
 }
 
 /**
- * The public edition — every filed story, from every filer.
+ * The public edition — every public story, from every filer.
  *
  * No identity required: the front page is a newspaper, so it reads the same for
- * everyone. Ownership is provenance (internal), not a filter.
+ * everyone. Ownership is provenance (internal), not a filter. Stories their
+ * filers keep private are not in it.
  */
 export function listSessions(): Promise<Session[]> {
   return request<SessionListResponse>('/api/sessions').then((d) => d.sessions);
+}
+
+/** Your own filings, newest first — public and private, each saying which. */
+export function listFilings(): Promise<Filing[]> {
+  return request<{ sessions: Filing[] }>('/api/desk/filings').then((d) => d.sessions);
 }
 
 /**
@@ -125,39 +133,81 @@ export function mediaSrc(src: string): string {
   return `${API_BASE}${src}`;
 }
 
-/** A single story, public by permalink: no sign-in required. */
+/**
+ * One of your own copied images, by its storage key.
+ *
+ * The signed-in route, not the public `/api/media/`: a private story's images
+ * are served nowhere else, and the media page shows only your own.
+ */
+export function ownImageSrc(key: string): string {
+  return `${API_BASE}/api/desk/image/${key}`;
+}
+
+/** A single public story, by permalink: no sign-in required. */
 export function getSession(id: string): Promise<SessionDetail> {
   return request<SessionDetail>(`/api/sessions/${encodeURIComponent(id)}`);
 }
 
-export function ingestSession(shareUrl: string): Promise<IngestResult> {
+/**
+ * A story as whoever is asking may read it.
+ *
+ * The public permalink first. A story its filer keeps private is not there —
+ * it answers 404 to everyone — so the reader's own copy is asked for next, on
+ * the signed-in desk route; that answers only its filer. When neither does, the
+ * public answer is the one reported: from where the reader stands, there is no
+ * such story.
+ */
+export function readStory(id: string): Promise<SessionDetail> {
+  return getSession(id).catch((notPublic: unknown) =>
+    request<SessionDetail>(`/api/desk/stories/${encodeURIComponent(id)}`).catch(() => {
+      throw notPublic;
+    }),
+  );
+}
+
+export function ingestSession(shareUrl: string, visibility: Visibility): Promise<IngestResult> {
   return request<IngestResult>('/api/desk/ingest', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ share_url: shareUrl }),
+    body: JSON.stringify({ share_url: shareUrl, visibility }),
   });
 }
 
 export interface FilingStatus {
   yours: boolean;
+  /** Public or private, when it is yours; `null` otherwise. */
+  visibility: Visibility | null;
   /** How the story's image copies stand; `null` when it has no images. */
   images: MediaCounts | null;
 }
 
 /**
  * Whether the signed-in reader filed this story — so the reader can offer them
- * a retraction and a link to its images. Not theirs for anyone else, and for
- * anonymous visitors: Access bounces their `/api/desk/` call (or it 401s),
- * which is the same answer.
+ * its controls (delete, public or private) and a link to its images. Not theirs
+ * for anyone else, and for anonymous visitors: Access bounces their
+ * `/api/desk/` call (or it 401s), which is the same answer.
  */
 export function filingStatus(id: string): Promise<FilingStatus> {
   return request<FilingStatus>(`/api/desk/sessions/${encodeURIComponent(id)}`).catch(() => ({
     yours: false,
+    visibility: null,
     images: null,
   }));
 }
 
-/** Take one of your own stories out of the edition. Someone else's copy stays. */
+/** Make one of your own stories public or private. Someone else's copy is untouched. */
+export function setVisibility(id: string, visibility: Visibility): Promise<void> {
+  return request<{ visibility: Visibility }>(`/api/desk/sessions/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ visibility }),
+  }).then(() => undefined);
+}
+
+/**
+ * Delete one of your own stories: its transcript, report, sources and images.
+ * Someone else's copy of the same link stays.
+ */
 export function retractSession(id: string): Promise<void> {
   return request<{ retracted: boolean }>(`/api/desk/sessions/${encodeURIComponent(id)}`, {
     method: 'DELETE',
