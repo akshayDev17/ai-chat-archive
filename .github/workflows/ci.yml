@@ -588,11 +588,14 @@ jobs:
       # runner is a datacenter IP, not a browser), which still proves the route
       # is attached and Cloudflare is serving it — unlike the GitHub Pages 404
       # that means the route fell through. The story check proves worker.js's
-      # UUID rewrite onto _story.html works.
+      # UUID rewrite onto _story.html works. The query URL proves the
+      # `chat-archives*` route matches a query string (an exact `chat-archives`
+      # route never did, and the GitHub Pages 404 answered).
       - name: Verify the frontend answers
         run: |
           for url in \
             "https://akshayprabhakant.com/chat-archives" \
+            "https://akshayprabhakant.com/chat-archives?verify=1" \
             "https://akshayprabhakant.com/chat-archives/6ac877f9-c690-83ec-8394-61b0727ba5eb"; do
             code=""
             for attempt in 1 2 3 4 5; do

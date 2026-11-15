@@ -17,6 +17,12 @@
  * forward to site-shell's own files (its picker script). In production the zone
  * routes `/_site/*` to site-shell directly, so this Worker sees it only under
  * `wrangler dev` (README: theme work), where it stands in for that route.
+ *
+ * The route is `chat-archives*` (so `/chat-archives?x=1` reaches the Worker;
+ * see wrangler.jsonc), which also catches paths that merely start with the
+ * prefix, such as `/chat-archivesfoo` or `/chat-archives.html`. Those are not
+ * the archive's: they go to the origin exactly as they came. `/_next/*` and
+ * `/vendors/*` are the archive's own routes and keep going to ASSETS.
  */
 const PREFIX = '/chat-archives';
 
@@ -27,6 +33,7 @@ export default {
     if (site.startsWith('/_site/') && env.SHELL) {
       return env.SHELL.fetch(new Request(new URL(site, url), request));
     }
+    if (isPrefixLookalike(url.pathname)) return fetch(request);
     // Share ids are UUIDs; `login`, `desk`, `_story`, and the front page are not.
     const target = /^\/chat-archives\/[0-9a-fA-F-]{36}\/?$/.test(url.pathname)
       ? new URL(`${PREFIX}/_story`, url)
@@ -35,6 +42,11 @@ export default {
     return withShell(await page(), env, page, 'chat', `${PREFIX}/_site/`);
   },
 };
+
+/** `/chat-archivesfoo`, `/chat-archives.html`: starts with the prefix but is neither it nor under it. */
+function isPrefixLookalike(path) {
+  return path.startsWith(PREFIX) && path !== PREFIX && !path.startsWith(`${PREFIX}/`);
+}
 
 /**
  * Passes an HTML page through site-shell's compose(), failing open: with no

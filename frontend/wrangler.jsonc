@@ -8,11 +8,13 @@
   // personal site (GitHub Pages) and /api/* stays the Python Worker.
   "workers_dev": false,
   "routes": [
-    // The bare path needs its own entry: `chat-archives/*` matches everything
-    // *under* /chat-archives/ but not /chat-archives itself, so the front page
-    // fell through to GitHub Pages (404).
-    { "pattern": "akshayprabhakant.com/chat-archives", "zone_name": "akshayprabhakant.com" },
-    { "pattern": "akshayprabhakant.com/chat-archives/*", "zone_name": "akshayprabhakant.com" },
+    // One `chat-archives*` route, not `chat-archives` + `chat-archives/*`: a
+    // route matches the whole URL including the query string and a pattern
+    // cannot contain one, so an exact `chat-archives` never matched
+    // /chat-archives?x=1 and that fell through to GitHub Pages (404). The
+    // wildcard also catches /chat-archivesfoo and the like; worker.js hands
+    // those back to the origin untouched.
+    { "pattern": "akshayprabhakant.com/chat-archives*", "zone_name": "akshayprabhakant.com" },
     { "pattern": "akshayprabhakant.com/_next/*", "zone_name": "akshayprabhakant.com" },
     { "pattern": "akshayprabhakant.com/vendors/*", "zone_name": "akshayprabhakant.com" }
   ],
