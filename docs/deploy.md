@@ -376,9 +376,10 @@ repository, as it gives access to deploy Workers on your account."
 - **`test`** — runs on every push and pull request. Backend tests twice, once as
   scripts and once through pytest, then `npm ci`, `npm run test:lib`,
   `npm run test:worker`, `tsc --noEmit` and `npm run build:check`, then the
-  export tests (`npm run test:export`: no bundled theme, the picker element,
-  the site path slot with each page's crumbs and fallback, tokens only in the
-  fallback) and the site-shell contract: the static export served by
+  export tests (`npm run test:export`: no bundled theme, the tab icon inline in
+  every page, the picker element, the site path slot with each page's crumbs
+  and fallback, tokens only in the fallback) and the site-shell contract: the
+  static export served by
   `wrangler dev` with
   `akshayDev17/site-themes` `main`'s site-shell (`npm run test:shell`), each
   page also loaded in headless Chrome, which must hydrate with no console error,
