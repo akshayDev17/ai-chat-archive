@@ -46,6 +46,19 @@ test('no exported page carries a theme boot script or theme tokens of its own', 
   }
 });
 
+test('every exported page declares the newspaper tab icon inline, on no path of its own', () => {
+  for (const file of pages()) {
+    const html = readFileSync(file, 'utf8');
+    const head = html.slice(0, html.indexOf('</head>'));
+    const icons = [...head.matchAll(/<link rel="icon" href="([^"]*)"/g)].map((m) => m[1]);
+    assert.equal(icons.length, 1, `${relative(out, file)}: one tab icon`);
+    assert.ok(icons[0].startsWith('data:image/svg+xml,'), `${relative(out, file)}: inline SVG, not a file`);
+    const svg = decodeURIComponent(icons[0].slice('data:image/svg+xml,'.length));
+    assert.match(svg, /stroke:#B00020/, 'the site red');
+    assert.match(svg, /@media \(prefers-color-scheme:dark\)\{\.g\{stroke:#FF8A95\}\}/, 'the dark theme red in a dark browser');
+  }
+});
+
 // Each exported page, its crumbs after "AI Digest" in the site path, and the
 // back link its slot shows when site-shell does not fill it.
 const MASTHEADS = {
