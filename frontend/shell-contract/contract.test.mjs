@@ -158,7 +158,7 @@ test('bound to site-shell: every page gains the theme head block and the site ro
 // In the installed Google Chrome (channel 'chrome'; GitHub's Ubuntu runners
 // ship it), so CI downloads no browser. Paths outside this Worker's routes
 // (wrangler.jsonc) are answered by others in production, the API Worker and
-// GitHub Pages (/favicon.ico), so their failed loads here are not counted.
+// GitHub Pages, so their failed loads here are not counted.
 // /_site/* is site-shell's zone route; here the app Worker forwards it.
 const ROUTED = /^\/(chat-archives|_next|vendors|_site)(\/|$)/;
 
