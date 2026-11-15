@@ -109,10 +109,16 @@ product decision, not a technical one, and it is the whole of the tradeoff.
 
 **Decision (settled): static export, served by a second Worker — not OpenNext.**
 The frontend is `output: 'export'` plus a tiny static-assets Worker
-(`frontend/worker.js` + `frontend/wrangler.jsonc`) on `/chat-archives/*`,
+(`frontend/worker.js` + `frontend/wrangler.jsonc`) on `/chat-archives*`,
 `/_next/*` and `/vendors/*`, with a UUID rewrite onto the one prerendered
-`_story.html`. The "unbounded share ids" blocker above was solved with a
-placeholder `generateStaticParams` plus that rewrite, not by changing the URL.
+`_story.html`. The archive route is `chat-archives*`, not `chat-archives` +
+`chat-archives/*`, because a route matches the whole URL including the query
+string and a pattern cannot contain one: the exact `chat-archives` never matched
+`/chat-archives?x=1`, which fell through to the GitHub Pages 404. The wildcard
+also catches `/chat-archivesfoo` and the like, which `worker.js` returns to the
+origin untouched with `fetch(request)`. The "unbounded share ids" blocker above
+was solved with a placeholder `generateStaticParams` plus that rewrite, not by
+changing the URL.
 
 **The shared site theme: site-shell.** The frontend Worker binds the Worker
 `site-shell` (`akshayDev17/site-themes`, `shell/`) as `SHELL` and passes every

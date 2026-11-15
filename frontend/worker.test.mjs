@@ -138,3 +138,43 @@ test('/chat-archives/_site/* without SHELL falls through to ASSETS as before', a
   assert.equal(res.status, 404);
   assert.deepEqual(env.ASSETS.calls, ['/chat-archives/_site/1132669f0ee1/site.js']);
 });
+
+test('/chat-archives?<query> is served in place like /chat-archives (the app is no-trailing-slash)', async () => {
+  const env = { ASSETS: assets(), SHELL: shell() };
+  for (const path of ['/chat-archives?x=1', '/chat-archives?', '/chat-archives?g=rag&y=%20z']) {
+    const res = await get(path, env);
+    assert.equal(res.status, 200, path);
+    assert.equal(res.headers.get('location'), null, `${path}: no redirect`);
+    assert.equal(res.headers.get('x-site-shell'), 'test; app=chat', path);
+  }
+  assert.deepEqual(env.ASSETS.calls, ['/chat-archives', '/chat-archives', '/chat-archives']);
+});
+
+test('paths that only start with the prefix go to the origin as the very same Request', async (t) => {
+  const seen = [];
+  const origin = new Response('origin 404', { status: 404 });
+  t.mock.method(globalThis, 'fetch', async (req) => {
+    seen.push(req);
+    return origin;
+  });
+  const env = { ASSETS: assets(), SHELL: shell() };
+  const paths = ['/chat-archivesfoo', '/chat-archivesfoo?x=1', '/chat-archives.html', '/chat-archives-x/y?x=1', '/chat-archives_site/x'];
+  for (const path of paths) {
+    const req = new Request(`https://akshayprabhakant.com${path}`, { method: 'POST', body: 'b', headers: { 'x-t': path } });
+    const res = await worker.fetch(req, env);
+    assert.equal(seen.at(-1), req, `${path}: the incoming Request itself`);
+    assert.equal(res, origin, `${path}: the origin's response, unchanged`);
+  }
+  assert.equal(seen.length, paths.length);
+  assert.deepEqual(env.ASSETS.calls, [], 'never ASSETS');
+  assert.deepEqual(env.SHELL.calls, { compose: [], fetch: [] }, 'never site-shell');
+});
+
+test('the archive\'s own paths and its /_next/* and /vendors/* routes never go to the origin', async (t) => {
+  const origin = t.mock.method(globalThis, 'fetch', async () => new Response('origin'));
+  const env = { ASSETS: assets() };
+  const paths = ['/chat-archives', '/chat-archives?x=1', '/chat-archives/', '/chat-archives/?x=1', '/chat-archives/login', `/chat-archives/${STORY}?x=1`, '/_next/static/x.js', '/vendors/claude.svg?x=1'];
+  for (const path of paths) await get(path, env);
+  assert.equal(origin.mock.callCount(), 0);
+  assert.equal(env.ASSETS.calls.length, paths.length);
+});
