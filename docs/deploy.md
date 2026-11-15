@@ -2,7 +2,7 @@
 
 Everything in this file's scope is now live: the Python API Worker on `/api/*`,
 Cloudflare Access + OTP on `/api/desk/*`, D1, and the frontend as a static export
-served by a second Worker on `/chat-archives/*`. See §1 for the settled topology
+served by a second Worker on `/chat-archives*`. See §1 for the settled topology
 and §4a/`docs/fetch-proxy.md` for how ingest reaches ChatGPT.
 
 Read §1 first: it records the topology decision, now settled (static export).

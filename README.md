@@ -341,7 +341,7 @@ migration silently cannot run.
 
 **`docs/deploy.md` is the full guide**, and **`.github/workflows/ci.yml`** is the
 pipeline. Everything is deployed: the Python API Worker on `/api/*`, Access + OTP
-on `/api/desk/*`, D1, and the frontend as a static export on `/chat-archives/*`.
+on `/api/desk/*`, D1, and the frontend as a static export on `/chat-archives*`.
 Ingest reaches ChatGPT through an off-Cloudflare proxy — see **`docs/fetch-proxy.md`**
 for the reusable pattern.
 
