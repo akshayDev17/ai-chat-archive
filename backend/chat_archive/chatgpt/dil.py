@@ -263,7 +263,7 @@ def parse_dil(code: str, constants: dict) -> Element:
 
 #: Prose elements, written as Markdown. Everything else lowercase is a layout
 #: tag (``box``, ``row``, ``icon``, ``divider``, …), written as markup.
-_PROSE = {"text", "title", "list", "table", "blockquote", "code"}
+_PROSE = {"text", "title", "list", "table", "blockquote"}
 #: Containers the share page wraps around prose; they add nothing to it.
 _TRANSPARENT = {_FRAGMENT, "col", "pressable"}
 _HEADING = {"2xl": "# ", "xl": "# ", "lg": "## ", "md": "### ", "sm": "#### "}
@@ -447,7 +447,7 @@ def _block(out: _Writer, node: object, lead: str, in_tag: bool) -> None:
         out.write("> ")
         _blocks(out, node.children, lead + "> ", in_tag=False)
     elif kind == "code":
-        _inline_element(out, node, lead)
+        raise UnsupportedDil("block-level code")
     elif kind == "divider" and not in_tag:
         out.write("---")
     elif kind == "Link":
@@ -470,8 +470,9 @@ def _layout(out: _Writer, node: Element, lead: str) -> None:
 
 def _list(out: _Writer, node: Element, lead: str, in_tag: bool) -> None:
     numbered = node.props.get("marker") == "number"
-    items = [c for c in node.children if isinstance(c, Element)]
-    for n, item in enumerate(items, start=1):
+    if not all(isinstance(c, Element) for c in node.children):
+        raise UnsupportedDil("list child is not an element")
+    for n, item in enumerate(node.children, start=1):
         if n > 1:
             out.write("\n" + lead)
         marker = f"{n}. " if numbered else "- "
@@ -491,11 +492,13 @@ def _cell(out: _Writer, cell: Element) -> None:
 
 
 def _table(out: _Writer, node: Element, lead: str) -> None:
-    rows = [r for r in node.children if isinstance(r, Element) and r.type == "table-row"]
-    if not rows:
-        raise UnsupportedDil("table without rows")
+    rows = node.children
+    if not rows or not all(isinstance(r, Element) and r.type == "table-row" for r in rows):
+        raise UnsupportedDil("table children are not rows")
     for n, row in enumerate(rows):
-        cells = [c for c in row.children if isinstance(c, Element)]
+        cells = row.children
+        if not all(isinstance(c, Element) for c in cells):
+            raise UnsupportedDil("table cell is not an element")
         if n:
             out.write("\n" + lead)
         out.write("| ")

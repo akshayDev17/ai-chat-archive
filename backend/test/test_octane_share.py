@@ -91,6 +91,14 @@ def web_mobile_data(html: str = OCTANE_SHARE) -> dict:
     return json.loads(body)
 
 
+def dil_program(body: str) -> str:
+    """A DIL program whose render function returns ``body``."""
+    return (
+        'DIL.render(__dil.jsx(()=>{const __dilConstants=DIL.useConstants();'
+        f'return {body};}},{{"key":"body:0"}}));'
+    )
+
+
 def parse(html: str = OCTANE_SHARE):
     return ChatGptParser().parse(SHARE_ID, ChatGptShareDecoder().decode(html))
 
@@ -201,6 +209,33 @@ class GenUIReply(unittest.TestCase):
         message = parse(octane_page(data)).messages[3]
         self.assertEqual(message.content, reply["content"])
         self.assertEqual((message.sources, message.media), ([], []))
+
+    def test_what_the_markup_cannot_hold_keeps_the_pages_own_markdown(self):
+        kept_item = '__dil.jsx("list-item",null,"kept")'
+        kept_row = '__dil.jsx("table-row",null,__dil.jsx("table-cell",null,"kept"))'
+        programs = {
+            "block-level code": '__dil.jsx("code",{"language":"python"},"import os\\n\\nprint(os.getcwd())")',
+            "bare text in a list": f'__dil.jsx("list",null,"loose item",{kept_item})',
+            "bare text in a table": f'__dil.jsx("table",null,"loose row",{kept_row})',
+            "bare text in a table row": (
+                '__dil.jsx("table",null,__dil.jsx("table-row",null,"loose cell",'
+                '__dil.jsx("table-cell",null,"kept")))'
+            ),
+        }
+        for name, body in programs.items():
+            with self.subTest(program=name):
+                data = web_mobile_data()
+                reply = data["conversation"]["messages"][3]
+                reply["source"]["dil"]["code"] = dil_program(body)
+                with self.assertRaises(UnsupportedDil):
+                    render_dil(reply["source"]["dil"])
+                message = parse(octane_page(data)).messages[3]
+                self.assertEqual(message.content, reply["content"])
+
+        lists_only_items = {"code": dil_program(f'__dil.jsx("list",null,{kept_item})'), "constants": {}}
+        self.assertEqual(render_dil(lists_only_items), ("- kept", []))
+        table_only_rows = {"code": dil_program(f'__dil.jsx("table",null,{kept_row})'), "constants": {}}
+        self.assertEqual(render_dil(table_only_rows), ("| kept |\n|---|", []))
 
     def test_function_props_are_dropped_and_never_run(self):
         self.assertNotIn("onClick", self.message.content)

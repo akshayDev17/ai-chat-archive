@@ -168,6 +168,13 @@ class TestClassifier(unittest.TestCase):
         self.assertEqual(diagnostic["keys_absent"], ["conversation", "messages"])
         self.assertIsNone(diagnostic["page_kind"])
 
+    def test_an_unparseable_octane_payload_logs_the_head_of_its_text(self):
+        html = OCTANE_WITHOUT_CONVERSATION.replace('{"kind"', '{"kind" oops', 1)
+        self.assertTrue(missing_conversation(html).log_sample.startswith('{"kind" oops'))
+
+        long_page = octane_page({"kind": "conversation", "note": "z" * 10_000}).replace('{"kind"', '{"kind" oops', 1)
+        self.assertEqual(len(missing_conversation(long_page).log_sample), LOG_SAMPLE_MAX_CHARS)
+
     def test_payload_values_are_reported_only_as_identifiers(self):
         diagnostic = missing_conversation(deleted_share(f"error: {PAYLOAD_SECRET} <b>")).diagnostic
         self.assertIsNone(diagnostic["server_response_type"])

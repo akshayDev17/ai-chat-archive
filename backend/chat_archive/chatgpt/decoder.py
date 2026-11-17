@@ -24,6 +24,7 @@ import re
 from ..ports import PayloadDecoder
 from .page_diagnostic import (
     diagnose_missing_conversation,
+    LOG_SAMPLE_MAX_CHARS,
     diagnose_missing_payload,
     log_sample,
     payload_log_sample,
@@ -139,23 +140,31 @@ class ChatGptShareDecoder(PayloadDecoder):
             raise ValueError("Flight payload did not decode to an object")
         conversation = _follow(root, self._FLIGHT_PATH)
         if not isinstance(conversation, dict):
-            raise self._missing(html, payload, "flight", root, self._FLIGHT_PATH)
+            raise self._missing(
+                html, payload, "flight", root, self._FLIGHT_PATH, payload_log_sample(root, self._FLIGHT_PATH)
+            )
         return conversation
 
     def _decode_web_mobile(self, html: str, payload: str) -> dict:
         try:
             data = json.loads(payload)
         except ValueError:
-            data = None
+            raise self._missing(
+                html, payload, "web_mobile_data", None, self._WEB_MOBILE_PATH, payload[:LOG_SAMPLE_MAX_CHARS]
+            ) from None
         conversation = web_mobile_conversation(data)
         if conversation is None:
-            raise self._missing(html, payload, "web_mobile_data", data, self._WEB_MOBILE_PATH)
+            raise self._missing(
+                html, payload, "web_mobile_data", data, self._WEB_MOBILE_PATH,
+                payload_log_sample(data, self._WEB_MOBILE_PATH),
+            )
         return conversation_from_web_mobile(conversation)
 
     @staticmethod
-    def _missing(html: str, payload: str, kind: str, root: object, path: tuple) -> MissingConversationData:
-        diagnostic = diagnose_missing_conversation(html, payload, kind, root, path)
-        return MissingConversationData(diagnostic, payload_log_sample(root, path))
+    def _missing(
+        html: str, payload: str, kind: str, root: object, path: tuple, sample: str
+    ) -> MissingConversationData:
+        return MissingConversationData(diagnose_missing_conversation(html, payload, kind, root, path), sample)
 
     @staticmethod
     def _enqueued_chunks(html: str) -> list[str]:
