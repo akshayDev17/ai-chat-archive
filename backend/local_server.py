@@ -58,6 +58,7 @@ from pathlib import Path
 from chat_archive.chatgpt.decoder import ChatGptFlightDecoder
 from chat_archive.chatgpt.fetcher import HttpImageFetcher, HttpShareFetcher
 from chat_archive.chatgpt.parser import ChatGptParser
+from chat_archive.ingest_failure import ingest_failure_body
 from chat_archive.local_media_store import DirectoryMediaStore
 from chat_archive.media_copier import copy_pending, retract_story
 from chat_archive.models import normalize_email
@@ -450,7 +451,7 @@ class Handler(BaseHTTPRequestHandler):
                 }
             )
         except Exception as exc:  # noqa: BLE001 - surface any ingest failure
-            self._json({"error": str(exc)}, 400)
+            self._json(ingest_failure_body(exc), 400)
 
     def _serve_media(self, key: str | None, email: str | None):
         """One copied image, to anyone (``email`` None) or to its filer.
