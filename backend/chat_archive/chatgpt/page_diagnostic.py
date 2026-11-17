@@ -4,19 +4,18 @@ Two decoder failures carry a diagnostic from here: "No flight payload found in
 page" (:func:`diagnose_missing_payload`) and "Could not locate conversation
 data in payload" (:func:`diagnose_missing_conversation`, at the end).
 
-
 The decoder fails with "No flight payload found in page" whenever an HTTP 200
-page holds no ``streamController.enqueue(...)`` chunk. That single message
-covers three different root causes, and only one of them means our decoder is
-out of date:
+page holds neither a ``streamController.enqueue(...)`` chunk nor a
+``__WEB_MOBILE_DATA__`` script. That single message covers three different
+root causes, and only one of them means our decoder is out of date:
 
   * ``challenge_page``   — a bot / challenge page served with 200 (Cloudflare's
                            "Just a moment", a cf challenge script, ...).
   * ``share_unavailable``— a deleted, private or mistyped share, served as a
                            page with no enqueue call site and no conversation
                            data whose title or visible text says so.
-  * ``format_change``    — a normal-looking ChatGPT page with no enqueue chunk
-                           our pattern matches: ChatGPT probably changed how it
+  * ``format_change``    — a normal-looking ChatGPT page with neither payload
+                           our decoder reads: ChatGPT probably changed how it
                            embeds the conversation.
   * ``unknown``          — none of the above.
 

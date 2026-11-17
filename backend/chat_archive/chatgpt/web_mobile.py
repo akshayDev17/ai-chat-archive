@@ -27,7 +27,6 @@ markup by :mod:`.dil`.
 
 from __future__ import annotations
 
-import json
 import re
 
 from .dil import UnsupportedDil, render_dil
