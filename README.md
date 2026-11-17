@@ -163,7 +163,7 @@ backend/
 │   ├── local_repository.py     # in-memory test double
 │   └── chatgpt/            # vendor implementations of the ports
 │       ├── fetcher.py      # HttpShareFetcher
-│       ├── decoder.py      # ChatGptFlightDecoder (RSC flight unpacking)
+│       ├── decoder.py      # ChatGptShareDecoder (octane JSON or RSC flight payload)
 │       └── parser.py       # ChatGptParser (transcript / report / citations)
 ├── local_server.py         # runs the same service off-Cloudflare (stdlib only)
 ├── test/test_decode.py     # network test: decode + parse a real share link

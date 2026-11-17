@@ -1,7 +1,13 @@
 """ChatGPT share-page payload decoding.
 
-The share page embeds the conversation as a React Server Components (RSC)
-"flight" payload — a flat JSON array where:
+chatgpt.com serves a share in one of two page formats, and as of 2026-11-17
+serves both: most shares come from its "octane" web app, which carries the
+conversation as JSON in ``<script id="__WEB_MOBILE_DATA__">`` (read by
+:mod:`.web_mobile`); others — and every deleted or unknown share — still come
+from the React Router app, which embeds it as a React Server Components (RSC)
+"flight" payload in ``streamController.enqueue("…")`` calls.
+
+The flight payload is a flat JSON array where:
 
   * strings / numbers / booleans are inline literals,
   * a dict  {"_N": M}  is an object: key string at data[N], value at data[M],
@@ -16,7 +22,14 @@ import json
 import re
 
 from ..ports import PayloadDecoder
-from .page_diagnostic import diagnose_missing_payload, log_sample
+from .page_diagnostic import (
+    diagnose_missing_conversation,
+    LOG_SAMPLE_MAX_CHARS,
+    diagnose_missing_payload,
+    log_sample,
+    payload_log_sample,
+)
+from .web_mobile import conversation_from_web_mobile, web_mobile_conversation, web_mobile_payload
 
 # Matches `streamController.enqueue("...")` and captures the JS string literal.
 _ENQUEUE_RE = re.compile(r'streamController\.enqueue\("((?:[^"\\]|\\.)*)"\)')
@@ -28,6 +41,19 @@ class MissingFlightPayload(ValueError):
     ``log_sample`` a bounded raw head of the page for server-side logs only."""
 
     MESSAGE = "No flight payload found in page"
+
+    def __init__(self, diagnostic: dict, log_sample: str):
+        super().__init__(self.MESSAGE)
+        self.diagnostic = diagnostic
+        self.log_sample = log_sample
+
+
+class MissingConversationData(ValueError):
+    """The page held a payload, but no conversation where one belongs. Like
+    :class:`MissingFlightPayload`: a stable message, a safe ``diagnostic`` of
+    the payload, and a bounded ``log_sample`` of it for server-side logs only."""
+
+    MESSAGE = "Could not locate conversation data in payload"
 
     def __init__(self, diagnostic: dict, log_sample: str):
         super().__init__(self.MESSAGE)
@@ -87,35 +113,67 @@ class FlightUnpacker:
         return chunk
 
 
-class ChatGptFlightDecoder(PayloadDecoder):
+class ChatGptShareDecoder(PayloadDecoder):
     """Decode a ChatGPT share page's HTML into the raw conversation dict."""
 
-    _CONVERSATION_PATH = (
+    _FLIGHT_PATH = (
         "loaderData",
         "routes/share.$shareId.($action)",
         "serverResponse",
         "data",
     )
+    _WEB_MOBILE_PATH = ("conversation", "messages")
 
     def decode(self, raw: str) -> dict:
-        payload = self._extract_payload(raw)
-        root = FlightUnpacker(payload).unpack()
+        chunks = self._enqueued_chunks(raw)
+        if chunks:
+            return self._decode_flight(raw, chunks[0])
+        payload = web_mobile_payload(raw)
+        if payload is not None:
+            return self._decode_web_mobile(raw, payload)
+        raise MissingFlightPayload(diagnose_missing_payload(raw), log_sample(raw))
+
+    def _decode_flight(self, html: str, payload: str) -> dict:
+        # The first enqueue carries the full payload; later chunks are increments.
+        root = FlightUnpacker(json.loads(payload)).unpack()
         if not isinstance(root, dict):
             raise ValueError("Flight payload did not decode to an object")
-        conversation = root
-        for key in self._CONVERSATION_PATH:
-            conversation = conversation.get(key) if isinstance(conversation, dict) else None
+        conversation = _follow(root, self._FLIGHT_PATH)
         if not isinstance(conversation, dict):
-            raise ValueError("Could not locate conversation data in payload")
+            raise self._missing(
+                html, payload, "flight", root, self._FLIGHT_PATH, payload_log_sample(root, self._FLIGHT_PATH)
+            )
         return conversation
 
+    def _decode_web_mobile(self, html: str, payload: str) -> dict:
+        try:
+            data = json.loads(payload)
+        except ValueError:
+            raise self._missing(
+                html, payload, "web_mobile_data", None, self._WEB_MOBILE_PATH, payload[:LOG_SAMPLE_MAX_CHARS]
+            ) from None
+        conversation = web_mobile_conversation(data)
+        if conversation is None:
+            raise self._missing(
+                html, payload, "web_mobile_data", data, self._WEB_MOBILE_PATH,
+                payload_log_sample(data, self._WEB_MOBILE_PATH),
+            )
+        return conversation_from_web_mobile(conversation)
+
     @staticmethod
-    def _extract_payload(html: str) -> list:
-        chunks: list[str] = []
-        for match in _ENQUEUE_RE.finditer(html):
-            # Unescape the JS string literal by re-quoting it as JSON.
-            chunks.append(json.loads('"' + match.group(1) + '"'))
-        if not chunks:
-            raise MissingFlightPayload(diagnose_missing_payload(html), log_sample(html))
-        # The first enqueue carries the full payload; later chunks are increments.
-        return json.loads(chunks[0])
+    def _missing(
+        html: str, payload: str, kind: str, root: object, path: tuple, sample: str
+    ) -> MissingConversationData:
+        return MissingConversationData(diagnose_missing_conversation(html, payload, kind, root, path), sample)
+
+    @staticmethod
+    def _enqueued_chunks(html: str) -> list[str]:
+        # Unescape each JS string literal by re-quoting it as JSON.
+        return [json.loads('"' + m.group(1) + '"') for m in _ENQUEUE_RE.finditer(html)]
+
+
+def _follow(root: object, path: tuple) -> object:
+    node = root
+    for key in path:
+        node = node.get(key) if isinstance(node, dict) else None
+    return node

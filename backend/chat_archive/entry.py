@@ -46,7 +46,7 @@ from datetime import datetime, timezone
 from workers import Response, WorkerEntrypoint
 
 from .auth import CloudflareAccessIdentity
-from .chatgpt.decoder import ChatGptFlightDecoder
+from .chatgpt.decoder import ChatGptShareDecoder
 from .chatgpt.parser import ChatGptParser
 from .chatgpt.proxy_fetcher import ProxyImageFetcher, ProxyShareFetcher, make_worker_fetch
 from .ingest_failure import ingest_failure_body
@@ -89,7 +89,7 @@ class Default(WorkerEntrypoint):
         token = getattr(env, "FETCH_TOKEN", "") if env is not None else ""
         return ShareService(
             fetcher=ProxyShareFetcher(make_worker_fetch(), proxy_base or "", token or ""),
-            decoder=ChatGptFlightDecoder(),
+            decoder=ChatGptShareDecoder(),
             parser=ChatGptParser(),
         )
 
