@@ -67,9 +67,14 @@ CHALLENGE = (
     "</body></html>"
 )
 UNAVAILABLE = (
-    "<html><head><title>ChatGPT - This shared link has been deleted</title>"
-    '<link href="https://cdn.oaistatic.com/assets/root.css">'
-    f"</head><body><main><h1>404 Not Found</h1><p>{PAGE_SECRET}</p></main>"
+    '<html><head><title>ChatGPT</title><link href="https://cdn.oaistatic.com/assets/root.css">'
+    f"</head><body><main><h1>404 Not Found</h1><p>{PAGE_SECRET}</p>"
+    "<p>This shared link has been deleted.</p></main>"
+    "<script>window.__reactRouterContext = {};</script></body></html>"
+)
+UNAVAILABLE_BY_TITLE = (
+    '<html><head><title>Conversation not found</title><link href="https://cdn.oaistatic.com/'
+    f'assets/root.css"></head><body><div id="root"></div><p>{PAGE_SECRET}</p>'
     "<script>window.__reactRouterContext = {};</script></body></html>"
 )
 # The call site survives but is backtick-quoted, so the decoder's regex misses it.
@@ -87,15 +92,24 @@ CF_JSD_SCRIPT = (
     "a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';"
     "document.getElementsByTagName('head')[0].appendChild(a);</script>"
 )
-# A ChatGPT share whose conversation prose and inlined JS bundle hold the very
-# phrases challenge and unavailable pages show, behind Cloudflare's jsd script.
+# A ChatGPT share whose rendered conversation and inlined JS bundle hold the
+# very phrases challenge and unavailable pages show, behind Cloudflare's jsd script.
 CHATGPT_PROSE_PAGE = (
     '<html><head><title>ChatGPT - Debugging a proxy</title><script src="https://cdn.oaistatic.com/'
     f'assets/entry.js"></script>{CF_JSD_SCRIPT}</head><body><article><p>{PAGE_SECRET}</p>'
-    "<p>The proxy shows &quot;Just a moment...&quot;, then 404 Not Found, then"
-    " Attention Required! | Cloudflare.</p></article>"
+    '<div data-message-author-role="user"><p>The proxy shows &quot;Just a moment...&quot;, then'
+    " 404 Not Found, then Attention Required! | Cloudflare, then This link is no longer"
+    " available.</p></div></article>"
     '<script>const t={notFound:"Conversation not found",deleted:"This shared link has been deleted",'
     'chl:"cf-chl-bypass"};window.__reactRouterContext = {"v":3};</script></body></html>'
+)
+# A ChatGPT shell with no conversation data: the phrases are only in its title's
+# conversation part and its JS bundle, so nothing visible says the share is gone.
+CHATGPT_SHELL_WITH_PROSE_TITLE = (
+    "<html><head><title>ChatGPT - Just a moment: fixing 404 Not Found errors</title>"
+    f'<script src="https://cdn.oaistatic.com/assets/entry.js"></script>{CF_JSD_SCRIPT}</head>'
+    f'<body><div id="root"></div><script>const t={{notFound:"Conversation not found"}};'
+    "window.__reactRouterContext = {};</script></body></html>"
 )
 
 FIXTURES = {
@@ -120,11 +134,21 @@ class TestClassifier(unittest.TestCase):
             with self.subTest(reason=reason):
                 self.assertEqual(diagnose_missing_payload(html)["reason"], reason)
 
+    def test_an_unavailable_share_is_recognised_by_its_title_too(self):
+        diagnostic = diagnose_missing_payload(UNAVAILABLE_BY_TITLE)
+        self.assertEqual(diagnostic["reason"], "share_unavailable")
+        self.assertIn("title_share_not_found", diagnostic["markers_present"])
+
     def test_a_chatgpt_page_is_a_format_change_whatever_its_prose_or_scripts_say(self):
         with_enqueue = CHATGPT_PROSE_PAGE.replace(
             "</body>", "<script>window.__reactRouterContext.streamController.enqueue(`[]`);</script></body>"
         )
-        for name, html in {"shell": CHATGPT_PROSE_PAGE, "enqueue call site": with_enqueue}.items():
+        pages = {
+            "rendered conversation": CHATGPT_PROSE_PAGE,
+            "enqueue call site": with_enqueue,
+            "conversation title": CHATGPT_SHELL_WITH_PROSE_TITLE,
+        }
+        for name, html in pages.items():
             with self.subTest(page=name):
                 self.assertEqual(diagnose_missing_payload(html)["reason"], "format_change")
 
