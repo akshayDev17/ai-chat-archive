@@ -38,7 +38,7 @@ BACKEND = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND))
 sys.path.insert(0, str(BACKEND / "test"))
 
-from chat_archive.chatgpt.decoder import ChatGptFlightDecoder, MissingFlightPayload  # noqa: E402
+from chat_archive.chatgpt.decoder import ChatGptShareDecoder, MissingFlightPayload  # noqa: E402
 from chat_archive.chatgpt.page_diagnostic import (  # noqa: E402
     LOG_SAMPLE_MAX_CHARS,
     TITLE_MAX_CHARS,
@@ -142,7 +142,7 @@ FIXTURES = {
 
 def missing_payload(html: str) -> MissingFlightPayload:
     try:
-        ChatGptFlightDecoder().decode(html)
+        ChatGptShareDecoder().decode(html)
     except MissingFlightPayload as exc:
         return exc
     raise AssertionError("the page decoded")
@@ -221,7 +221,7 @@ class _PageFetcher:
 
 def page_service(html: str) -> ShareService:
     """The real ingest path — decoder and parser — over a canned page."""
-    return ShareService(_PageFetcher(html), ChatGptFlightDecoder(), ChatGptParser())
+    return ShareService(_PageFetcher(html), ChatGptShareDecoder(), ChatGptParser())
 
 
 class MissingPayloadRoutes:

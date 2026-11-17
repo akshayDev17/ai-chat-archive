@@ -1,7 +1,10 @@
 """Local test for the pure backend logic (decoder + parser).
 
 Downloads the share page with stdlib (so it runs anywhere) and asserts the
-extraction. The Workers-specific pieces (js.fetch, D1) are exercised only at
+extraction. chatgpt.com serves this share from its octane app since
+2026-11-17; those pages carry the visible turns only, so the report — which
+the chat-to-markdown-report skill writes in a hidden tool turn — is asserted
+only when the page is the older flight format that still carries it. The Workers-specific pieces (js.fetch, D1) are exercised only at
 deploy; this test proves the decoding/parsing core end to end.
 
 Run:  python backend/test/test_decode.py
@@ -23,7 +26,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from chat_archive.chatgpt.decoder import ChatGptFlightDecoder  # noqa: E402
+from chat_archive.chatgpt.decoder import ChatGptShareDecoder  # noqa: E402
 from chat_archive.chatgpt.parser import ChatGptParser  # noqa: E402
 
 SHARE_ID = "6ac7f3f2-fdec-83ec-938b-c27990599e68"
@@ -46,23 +49,29 @@ def main() -> int:
     print(f"fetching {SHARE_URL} ...")
     html = fetch_html(SHARE_URL)
 
-    decoder = ChatGptFlightDecoder()
+    decoder = ChatGptShareDecoder()
     parser = ChatGptParser()
 
     raw = decoder.decode(html)
     conversation = parser.parse(SHARE_ID, raw)
 
+    flight = "streamController.enqueue" in html
+    sources = [s for m in conversation.messages for s in m.sources]
+    print("format  :", "flight" if flight else "octane")
     print("title   :", conversation.title)
     print("messages:", len(conversation.messages))
+    print("sources :", len(sources), "with", sum(len(s.spans) for s in sources), "inline spans")
     print("report  :", len(conversation.report or ""), "chars")
     print("citations:", len(conversation.citations))
 
     assert conversation.title, "title missing"
     assert len(conversation.messages) > 0, "no messages extracted"
-    assert conversation.report and conversation.report.startswith("#"), "report missing"
-    assert len(conversation.citations) > 0, "citations missing"
+    assert sources and all(s.spans for s in sources), "sources or their inline spans missing"
+    if flight:
+        assert conversation.report and conversation.report.startswith("#"), "report missing"
+        assert len(conversation.citations) > 0, "citations missing"
 
-    print("\nOK — transcript, report and citations all extracted.")
+    print("\nOK — transcript and sources extracted.")
     return 0
 
 

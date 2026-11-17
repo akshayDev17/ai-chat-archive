@@ -55,7 +55,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from chat_archive.chatgpt.decoder import ChatGptFlightDecoder
+from chat_archive.chatgpt.decoder import ChatGptShareDecoder
 from chat_archive.chatgpt.fetcher import HttpImageFetcher, HttpShareFetcher
 from chat_archive.chatgpt.parser import ChatGptParser
 from chat_archive.ingest_failure import ingest_failure_body
@@ -147,7 +147,7 @@ def copy_media_forever(interval: float = 60.0) -> None:
         time.sleep(interval)
 service = ShareService(
     fetcher=HttpShareFetcher(make_local_fetch()),
-    decoder=ChatGptFlightDecoder(),
+    decoder=ChatGptShareDecoder(),
     parser=ChatGptParser(),
 )
 

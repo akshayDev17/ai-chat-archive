@@ -1,4 +1,9 @@
-"""Why a fetched ChatGPT share page had no flight payload.
+"""Why a fetched ChatGPT share page gave us no conversation.
+
+Two decoder failures carry a diagnostic from here: "No flight payload found in
+page" (:func:`diagnose_missing_payload`) and "Could not locate conversation
+data in payload" (:func:`diagnose_missing_conversation`, at the end).
+
 
 The decoder fails with "No flight payload found in page" whenever an HTTP 200
 page holds no ``streamController.enqueue(...)`` chunk. That single message
@@ -24,6 +29,7 @@ returns page HTML.
 from __future__ import annotations
 
 import html as html_lib
+import json
 import re
 
 TITLE_MAX_CHARS = 120
@@ -163,3 +169,72 @@ def diagnose_missing_payload(html: str) -> dict:
 def log_sample(html: str) -> str:
     """The bounded head of the page, for server-side logs only."""
     return html[:LOG_SAMPLE_MAX_CHARS]
+
+
+# -- a payload with no conversation in it ---------------------------------------
+
+# Enum-like values from the payload (``serverResponse.type``, the page ``kind``)
+# are reported only when they look like an identifier: never free text.
+_ENUM_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,31}$")
+# The flight route's answer: ``{"type": "error", "error": "…"}`` for a share
+# that cannot be shown, ``{"data": {…conversation…}}`` otherwise.
+_SERVER_RESPONSE = "serverResponse"
+
+
+def _enum(value: object) -> str | None:
+    return value if isinstance(value, str) and _ENUM_RE.match(value) else None
+
+
+def _walk(root: object, path: tuple) -> tuple[list[str], object]:
+    """The keys of ``path`` found in order from ``root``, and the deepest node."""
+    found: list[str] = []
+    node = root
+    for key in path:
+        if not isinstance(node, dict) or key not in node:
+            break
+        found.append(key)
+        node = node[key]
+    return found, node
+
+
+def diagnose_missing_conversation(
+    html: str, payload: str, payload_kind: str, root: object, path: tuple
+) -> dict:
+    """Classify a payload that decoded but held no conversation at ``path``.
+
+    ``share_unavailable`` when the flight payload's ``serverResponse`` says it
+    is an error — what chatgpt.com serves for a deleted, private or unknown
+    share — and ``format_change`` otherwise: the payload is there, the
+    conversation is not where the decoder looks for it. Safe to return to a
+    caller: names, sizes and enum values only, never payload text.
+    """
+    found, _ = _walk(root, path)
+    response_type = None
+    if _SERVER_RESPONSE in found:
+        _, response = _walk(root, path[: found.index(_SERVER_RESPONSE) + 1])
+        response_type = _enum(response.get("type")) if isinstance(response, dict) else None
+    diagnostic = {
+        "reason": "share_unavailable" if response_type == "error" else "format_change",
+        "payload_kind": payload_kind,
+        "page_bytes": len(html.encode("utf-8")),
+        "payload_bytes": len(payload.encode("utf-8")),
+        "title": page_title(html),
+        "keys_present": found,
+        "keys_absent": list(path[len(found):]),
+    }
+    if payload_kind == "flight":
+        diagnostic["server_response_type"] = response_type
+    else:
+        diagnostic["page_kind"] = _enum(root.get("kind")) if isinstance(root, dict) else None
+    return diagnostic
+
+
+def payload_log_sample(root: object, path: tuple) -> str:
+    """The bounded JSON of the deepest node found on ``path``, for server-side
+    logs only — for a deleted share, the ``serverResponse`` that says so."""
+    _, node = _walk(root, path)
+    try:
+        text = json.dumps(node, ensure_ascii=False, default=str)
+    except (TypeError, ValueError):
+        text = repr(node)
+    return text[:LOG_SAMPLE_MAX_CHARS]
