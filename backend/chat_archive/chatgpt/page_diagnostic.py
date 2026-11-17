@@ -8,8 +8,8 @@ out of date:
   * ``challenge_page``   — a bot / challenge page served with 200 (Cloudflare's
                            "Just a moment", a cf challenge script, ...).
   * ``share_unavailable``— a deleted, private or mistyped share, served as a
-                           page whose title, or visible text when it carries no
-                           conversation data, says so.
+                           page with no enqueue call site and no conversation
+                           data whose title or visible text says so.
   * ``format_change``    — a normal-looking ChatGPT page with no enqueue chunk
                            our pattern matches: ChatGPT probably changed how it
                            embeds the conversation.
@@ -45,8 +45,9 @@ _CONVERSATION_TITLE_PREFIX = "chatgpt - "
 # reported in the diagnostic; the needles are not.
 #
 # Prose is never searched page-wide: there it can be conversation text or a UI
-# string inside a JS bundle. It is only trusted in the non-conversation part of
-# the ``<title>``, or in the visible text of a page with no conversation data.
+# string inside a JS bundle. It is only searched in the non-conversation part of
+# the ``<title>`` and in the visible text, and counts only when the page has no
+# enqueue call site and no conversation data.
 _TITLE_CHALLENGE_MARKERS = {
     "cf_just_a_moment": lambda title: title.startswith("just a moment"),
     "cf_attention_required": lambda title: title == "attention required! | cloudflare",

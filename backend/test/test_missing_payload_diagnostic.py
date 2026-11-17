@@ -103,8 +103,6 @@ CHATGPT_PROSE_PAGE = (
     '<script>const t={notFound:"Conversation not found",deleted:"This shared link has been deleted",'
     'chl:"cf-chl-bypass"};window.__reactRouterContext = {"v":3};</script></body></html>'
 )
-# A ChatGPT shell with no conversation data: the phrases are only in its title's
-# conversation part and its JS bundle, so nothing visible says the share is gone.
 # A reshaped page: a title outside the "ChatGPT - " form whose prose matches the
 # phrases, and the conversation JSON embedded some new way.
 RESHAPED_PAGE_WITH_PROSE_TITLE = (
@@ -113,6 +111,8 @@ RESHAPED_PAGE_WITH_PROSE_TITLE = (
     f'<body><div id="root"></div><p>{PAGE_SECRET}</p><script type="application/json">'
     '{"title":"Fixing 404 Not Found errors","current_node":"n1","mapping":{}}</script></body></html>'
 )
+# A ChatGPT shell with no conversation data: the phrases are only in its title's
+# conversation part and its JS bundle, so nothing visible says the share is gone.
 CHATGPT_SHELL_WITH_PROSE_TITLE = (
     "<html><head><title>ChatGPT - Just a moment: fixing 404 Not Found errors</title>"
     f'<script src="https://cdn.oaistatic.com/assets/entry.js"></script>{CF_JSD_SCRIPT}</head>'
