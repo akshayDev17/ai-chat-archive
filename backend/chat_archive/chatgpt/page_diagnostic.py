@@ -123,14 +123,12 @@ def _visible_text(html: str) -> str:
 
 
 def _reason(present: set[str]) -> str:
-    if present & _ENQUEUE_MARKER.keys():
+    if present & (_ENQUEUE_MARKER.keys() | _CONVERSATION_MARKERS.keys()):
         return "format_change"
     if present & _TITLE_CHALLENGE_MARKERS.keys():
         return "challenge_page"
     if present & _TITLE_UNAVAILABLE_MARKERS.keys():
         return "share_unavailable"
-    if present & _CONVERSATION_MARKERS.keys():
-        return "format_change"
     if present & _TEXT_UNAVAILABLE_MARKERS.keys():
         return "share_unavailable"
     if present & _CHATGPT_MARKERS.keys():

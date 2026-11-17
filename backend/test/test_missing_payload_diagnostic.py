@@ -105,6 +105,14 @@ CHATGPT_PROSE_PAGE = (
 )
 # A ChatGPT shell with no conversation data: the phrases are only in its title's
 # conversation part and its JS bundle, so nothing visible says the share is gone.
+# A reshaped page: a title outside the "ChatGPT - " form whose prose matches the
+# phrases, and the conversation JSON embedded some new way.
+RESHAPED_PAGE_WITH_PROSE_TITLE = (
+    "<html><head><title>Just a moment: fixing 404 Not Found errors | ChatGPT</title>"
+    '<script src="https://cdn.oaistatic.com/assets/entry.js"></script></head>'
+    f'<body><div id="root"></div><p>{PAGE_SECRET}</p><script type="application/json">'
+    '{"title":"Fixing 404 Not Found errors","current_node":"n1","mapping":{}}</script></body></html>'
+)
 CHATGPT_SHELL_WITH_PROSE_TITLE = (
     "<html><head><title>ChatGPT - Just a moment: fixing 404 Not Found errors</title>"
     f'<script src="https://cdn.oaistatic.com/assets/entry.js"></script>{CF_JSD_SCRIPT}</head>'
@@ -147,6 +155,7 @@ class TestClassifier(unittest.TestCase):
             "rendered conversation": CHATGPT_PROSE_PAGE,
             "enqueue call site": with_enqueue,
             "conversation title": CHATGPT_SHELL_WITH_PROSE_TITLE,
+            "reshaped title with conversation json": RESHAPED_PAGE_WITH_PROSE_TITLE,
         }
         for name, html in pages.items():
             with self.subTest(page=name):
