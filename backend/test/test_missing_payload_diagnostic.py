@@ -67,9 +67,9 @@ CHALLENGE = (
     "</body></html>"
 )
 UNAVAILABLE = (
-    '<html><head><title>ChatGPT</title><link href="https://cdn.oaistatic.com/assets/root.css">'
-    f"</head><body><main><h1>404 Not Found</h1><p>{PAGE_SECRET}</p>"
-    "<p>This shared link has been deleted.</p></main>"
+    "<html><head><title>ChatGPT - This shared link has been deleted</title>"
+    '<link href="https://cdn.oaistatic.com/assets/root.css">'
+    f"</head><body><main><h1>404 Not Found</h1><p>{PAGE_SECRET}</p></main>"
     "<script>window.__reactRouterContext = {};</script></body></html>"
 )
 # The call site survives but is backtick-quoted, so the decoder's regex misses it.
@@ -81,6 +81,22 @@ FORMAT_CHANGE = (
     "</script></body></html>"
 )
 OTHER = f"<html><head><title>Welcome to nginx!</title></head><body><p>{PAGE_SECRET}</p></body></html>"
+# Cloudflare bot management injects this into ordinary pages it serves.
+CF_JSD_SCRIPT = (
+    "<script>window.__CF$cv$params={r:'9a1b',t:'MTcz'};var a=document.createElement('script');"
+    "a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';"
+    "document.getElementsByTagName('head')[0].appendChild(a);</script>"
+)
+# A ChatGPT share whose conversation prose and inlined JS bundle hold the very
+# phrases challenge and unavailable pages show, behind Cloudflare's jsd script.
+CHATGPT_PROSE_PAGE = (
+    '<html><head><title>ChatGPT - Debugging a proxy</title><script src="https://cdn.oaistatic.com/'
+    f'assets/entry.js"></script>{CF_JSD_SCRIPT}</head><body><article><p>{PAGE_SECRET}</p>'
+    "<p>The proxy shows &quot;Just a moment...&quot;, then 404 Not Found, then"
+    " Attention Required! | Cloudflare.</p></article>"
+    '<script>const t={notFound:"Conversation not found",deleted:"This shared link has been deleted",'
+    'chl:"cf-chl-bypass"};window.__reactRouterContext = {"v":3};</script></body></html>'
+)
 
 FIXTURES = {
     "challenge_page": CHALLENGE,
@@ -103,6 +119,18 @@ class TestClassifier(unittest.TestCase):
         for reason, html in FIXTURES.items():
             with self.subTest(reason=reason):
                 self.assertEqual(diagnose_missing_payload(html)["reason"], reason)
+
+    def test_a_chatgpt_page_is_a_format_change_whatever_its_prose_or_scripts_say(self):
+        with_enqueue = CHATGPT_PROSE_PAGE.replace(
+            "</body>", "<script>window.__reactRouterContext.streamController.enqueue(`[]`);</script></body>"
+        )
+        for name, html in {"shell": CHATGPT_PROSE_PAGE, "enqueue call site": with_enqueue}.items():
+            with self.subTest(page=name):
+                self.assertEqual(diagnose_missing_payload(html)["reason"], "format_change")
+
+    def test_the_injected_jsd_script_alone_is_not_a_challenge(self):
+        html = OTHER.replace("</head>", CF_JSD_SCRIPT + "</head>")
+        self.assertEqual(diagnose_missing_payload(html)["reason"], "unknown")
 
     def test_the_decoder_error_is_unchanged_and_carries_the_diagnostic(self):
         exc = missing_payload(CHALLENGE)

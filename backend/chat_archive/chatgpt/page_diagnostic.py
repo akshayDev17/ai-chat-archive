@@ -8,7 +8,7 @@ out of date:
   * ``challenge_page``   — a bot / challenge page served with 200 (Cloudflare's
                            "Just a moment", a cf challenge script, ...).
   * ``share_unavailable``— a deleted, private or mistyped share, served as a
-                           ChatGPT shell page that says so.
+                           page whose title says so.
   * ``format_change``    — a normal-looking ChatGPT page with no enqueue chunk
                            our pattern matches: ChatGPT probably changed how it
                            embeds the conversation.
@@ -32,22 +32,29 @@ _TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
 _TAG_CHARS_RE = re.compile(r"[<>]")
 _SPACE_RE = re.compile(r"\s+")
 
-# Marker name -> lowercase substring searched for in the page. Names are the
-# stable identifiers reported in the diagnostic; the substrings are not.
-_CHALLENGE_MARKERS = {
+# Marker name -> lowercase substring. Names are the stable identifiers reported
+# in the diagnostic; the substrings are not.
+#
+# Prose is only trusted in the page ``<title>``: anywhere else it can be
+# conversation text or a UI string inside a JS bundle.
+_TITLE_CHALLENGE_MARKERS = {
     "cf_just_a_moment": "just a moment",
-    "cf_challenge_platform": "/cdn-cgi/challenge-platform/",
-    "cf_chl_opt": "_cf_chl_opt",
-    "cf_chl": "cf-chl",
     "cf_attention_required": "attention required! | cloudflare",
-    "enable_js_and_cookies": "enable javascript and cookies to continue",
 }
-_UNAVAILABLE_MARKERS = {
+_TITLE_UNAVAILABLE_MARKERS = {
     "share_not_found": "conversation not found",
     "share_deleted": "shared link has been deleted",
     "share_disabled": "shared link has been disabled",
     "share_unavailable_text": "this link is no longer available",
     "share_404_text": "404 not found",
+}
+# Searched page-wide. Only tokens of an actual challenge page — not the
+# ``/cdn-cgi/challenge-platform/scripts/jsd/`` script Cloudflare injects into
+# ordinary pages.
+_CHALLENGE_TOKEN_MARKERS = {
+    "cf_challenge_platform": "/cdn-cgi/challenge-platform/h/",
+    "cf_chl_opt": "_cf_chl_opt",
+    "cf_chl": "cf-chl",
 }
 _CHATGPT_MARKERS = {
     "chatgpt_title": "<title>chatgpt",
@@ -58,12 +65,9 @@ _CHATGPT_MARKERS = {
 # (an escaping or quoting change) — the sharpest format-change signal.
 _ENQUEUE_MARKER = {"stream_controller_enqueue": "streamcontroller.enqueue"}
 
-_ALL_MARKERS = {
-    **_CHALLENGE_MARKERS,
-    **_UNAVAILABLE_MARKERS,
-    **_CHATGPT_MARKERS,
-    **_ENQUEUE_MARKER,
-}
+_TITLE_MARKERS = {**_TITLE_CHALLENGE_MARKERS, **_TITLE_UNAVAILABLE_MARKERS}
+_PAGE_MARKERS = {**_CHALLENGE_TOKEN_MARKERS, **_CHATGPT_MARKERS, **_ENQUEUE_MARKER}
+_ALL_MARKERS = {**_TITLE_MARKERS, **_PAGE_MARKERS}
 
 
 def page_title(html: str) -> str | None:
@@ -76,23 +80,30 @@ def page_title(html: str) -> str | None:
 
 
 def _reason(present: set[str]) -> str:
-    if present & _CHALLENGE_MARKERS.keys():
-        return "challenge_page"
-    if present & _UNAVAILABLE_MARKERS.keys():
-        return "share_unavailable"
-    if present & (_CHATGPT_MARKERS.keys() | _ENQUEUE_MARKER.keys()):
+    if present & _ENQUEUE_MARKER.keys():
         return "format_change"
+    if present & _TITLE_CHALLENGE_MARKERS.keys():
+        return "challenge_page"
+    if present & _TITLE_UNAVAILABLE_MARKERS.keys():
+        return "share_unavailable"
+    if present & _CHATGPT_MARKERS.keys():
+        return "format_change"
+    if present & _CHALLENGE_TOKEN_MARKERS.keys():
+        return "challenge_page"
     return "unknown"
 
 
 def diagnose_missing_payload(html: str) -> dict:
     """Classify a page that held no flight payload. Safe to return to a caller."""
+    title = page_title(html)
+    lowered_title = (title or "").lower()
     lowered = html.lower()
-    present = {name for name, needle in _ALL_MARKERS.items() if needle in lowered}
+    present = {name for name, needle in _TITLE_MARKERS.items() if needle in lowered_title}
+    present |= {name for name, needle in _PAGE_MARKERS.items() if needle in lowered}
     return {
         "reason": _reason(present),
         "page_bytes": len(html.encode("utf-8")),
-        "title": page_title(html),
+        "title": title,
         "markers_present": sorted(present),
         "markers_absent": sorted(_ALL_MARKERS.keys() - present),
     }
