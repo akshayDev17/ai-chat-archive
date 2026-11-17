@@ -73,12 +73,15 @@ _CHATGPT_MARKERS = {
     "chatgpt_title": "<title>chatgpt",
     "oaistatic_assets": "cdn.oaistatic.com",
     "react_router_context": "__reactroutercontext",
+    "unauth_mweb_assets": "/unauth-mweb/",
 }
 # The conversation is in the page in some form: its JSON (``current_node`` is
-# a key of every conversation) or its rendered messages.
+# a key of every conversation) or its rendered messages (``data-message-role``
+# on the octane-rendered shares chatgpt.com served on 2026-11-17).
 _CONVERSATION_MARKERS = {
     "conversation_json": "current_node",
     "rendered_message": "data-message-author-role",
+    "rendered_message_role": "data-message-role",
 }
 # Present when the call site still exists but our regex no longer matches it
 # (an escaping or quoting change) — the sharpest format-change signal.

@@ -120,6 +120,18 @@ CHATGPT_SHELL_WITH_PROSE_TITLE = (
     "window.__reactRouterContext = {};</script></body></html>"
 )
 
+# Trimmed from a real share as chatgpt.com served it on 2026-11-17: a bare
+# conversation title, octane assets under /unauth-mweb/, and messages rendered
+# with data-message-role. None of the older ChatGPT markers are on it.
+OCTANE_SHARE_PAGE = (
+    '<!DOCTYPE html><html><head><title>India US Talks Plateau Reports</title>'
+    '<link rel="stylesheet" href="/unauth-mweb/assets/stylex-initial-modern-kbGGwT9k.css">'
+    '<script>(function(g){var z="__octaneStreamedSignalSelections",v=g[z];})(window);</script>'
+    f'</head><body><div data-message-role="user" id="58d57bb7"><p>{PAGE_SECRET}</p></div>'
+    '<div data-message-role="assistant" id="01c7920a"><p>Talks have plateaued.</p></div>'
+    "</body></html>"
+)
+
 FIXTURES = {
     "challenge_page": CHALLENGE,
     "share_unavailable": UNAVAILABLE,
@@ -156,6 +168,7 @@ class TestClassifier(unittest.TestCase):
             "enqueue call site": with_enqueue,
             "conversation title": CHATGPT_SHELL_WITH_PROSE_TITLE,
             "reshaped title with conversation json": RESHAPED_PAGE_WITH_PROSE_TITLE,
+            "current octane share": OCTANE_SHARE_PAGE,
         }
         for name, html in pages.items():
             with self.subTest(page=name):
