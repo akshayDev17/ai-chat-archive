@@ -16,9 +16,23 @@ import json
 import re
 
 from ..ports import PayloadDecoder
+from .page_diagnostic import diagnose_missing_payload, log_sample
 
 # Matches `streamController.enqueue("...")` and captures the JS string literal.
 _ENQUEUE_RE = re.compile(r'streamController\.enqueue\("((?:[^"\\]|\\.)*)"\)')
+
+
+class MissingFlightPayload(ValueError):
+    """The page held no flight payload. Its message is the stable public error;
+    ``diagnostic`` is a safe classification of the page for the response, and
+    ``log_sample`` a bounded raw head of the page for server-side logs only."""
+
+    MESSAGE = "No flight payload found in page"
+
+    def __init__(self, diagnostic: dict, log_sample: str):
+        super().__init__(self.MESSAGE)
+        self.diagnostic = diagnostic
+        self.log_sample = log_sample
 
 
 class FlightUnpacker:
@@ -102,6 +116,6 @@ class ChatGptFlightDecoder(PayloadDecoder):
             # Unescape the JS string literal by re-quoting it as JSON.
             chunks.append(json.loads('"' + match.group(1) + '"'))
         if not chunks:
-            raise ValueError("No flight payload found in page")
+            raise MissingFlightPayload(diagnose_missing_payload(html), log_sample(html))
         # The first enqueue carries the full payload; later chunks are increments.
         return json.loads(chunks[0])

@@ -49,6 +49,7 @@ from .auth import CloudflareAccessIdentity
 from .chatgpt.decoder import ChatGptFlightDecoder
 from .chatgpt.parser import ChatGptParser
 from .chatgpt.proxy_fetcher import ProxyImageFetcher, ProxyShareFetcher, make_worker_fetch
+from .ingest_failure import ingest_failure_body
 from .media_copier import copy_pending, retract_story
 from .r2_media_store import R2MediaStore
 from .repository import D1ConversationRepository
@@ -391,7 +392,7 @@ class Default(WorkerEntrypoint):
         except InvalidShareUrl as exc:
             return _json({"error": str(exc)}, status=400)
         except Exception as exc:  # fetch/parse failures -> 4xx for the caller
-            return _json({"error": str(exc)}, status=400)
+            return _json(ingest_failure_body(exc), status=400)
 
         return _json(
             {
