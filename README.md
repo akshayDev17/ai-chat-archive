@@ -38,7 +38,8 @@ page.
 The same session as a verbatim transcript, rendered the way ChatGPT renders it:
 user turns in a bubble, assistant turns as plain prose, redacted tool calls
 collapsed into a single counted note. The Report/Chat toggle at the top swaps
-between the two views.
+between the two views; a session with no report has no Report tab and opens on
+the chat.
 
 Inline `[n]` markers are the conversation's own citations — ChatGPT's source
 pills, restored rather than deleted (see `docs/sources.md`). Each assistant turn
