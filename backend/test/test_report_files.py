@@ -426,6 +426,35 @@ class CitationsInADownloadedReport(unittest.TestCase):
             ],
         )
 
+    def test_pandoc_numbered_plain_entries_under_the_bibliography(self):
+        # Share 6ac877f9's downloaded file: no brackets and no links, just a
+        # numbered list whose wrapped title ends in a hard break before the URL.
+        report = (
+            "# R\n\n## Bibliography\n\n"
+            '1.  **The White House.** "United States-India Joint Statement." February\n'
+            "    6, 2026, as identified in the conversation.\\\n"
+            "    https://www.whitehouse.gov/briefings-statements/2026/02/united-states-india-joint-statement/\n\n"
+            "2.  **A book.** No link.\n"
+            "3.  **Press Information Bureau, Government of India.** Joint Statement\n"
+            "    page referenced in the conversation.\\\n"
+            "    https://www.pib.gov.in/PressReleaseIframePage.aspx?PRID=2224783&lang=2&reg=48\n"
+        )
+        self.assertEqual(
+            citations(report),
+            [
+                (1, '**The White House.** "United States-India Joint Statement." February 6, 2026, '
+                    "as identified in the conversation.",
+                 "https://www.whitehouse.gov/briefings-statements/2026/02/united-states-india-joint-statement/"),
+                (3, "**Press Information Bureau, Government of India.** Joint Statement page referenced "
+                    "in the conversation.",
+                 "https://www.pib.gov.in/PressReleaseIframePage.aspx?PRID=2224783&lang=2&reg=48"),
+            ],
+        )
+
+    def test_a_numbered_list_with_url_lines_outside_the_bibliography_is_not_its_sources(self):
+        report = "# R\n\n## Steps\n\n1. Open the page.\n   https://example.com/a\n"
+        self.assertEqual(citations(report), [])
+
     def test_a_link_with_parentheses_in_its_url_keeps_them(self):
         report = "# R\n\n## References\n\n1. [Tide](https://en.wikipedia.org/wiki/Tide_(sea))\n"
         self.assertEqual(citations(report), [(1, "Tide", "https://en.wikipedia.org/wiki/Tide_(sea)")])

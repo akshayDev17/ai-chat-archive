@@ -111,7 +111,7 @@ Deno.serve(async (req) => {
 // content type passed through so the Worker can tell a report from an error page.
 async function fetchCapped(url: URL, accept: string, maxBytes: number): Promise<Response> {
   let upstream: Response;
-  let body: Uint8Array | null;
+  let body: Uint8Array<ArrayBuffer> | null;
   try {
     upstream = await fetch(url, {
       headers: { "User-Agent": USER_AGENT, "Accept": accept },
@@ -136,7 +136,7 @@ async function fetchCapped(url: URL, accept: string, maxBytes: number): Promise<
 }
 
 // The body, or null once it grows past maxBytes.
-async function readCapped(response: Response, maxBytes: number): Promise<Uint8Array | null> {
+async function readCapped(response: Response, maxBytes: number): Promise<Uint8Array<ArrayBuffer> | null> {
   const chunks: Uint8Array[] = [];
   let size = 0;
   for await (const chunk of response.body ?? []) {

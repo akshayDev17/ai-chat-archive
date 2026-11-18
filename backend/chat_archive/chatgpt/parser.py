@@ -49,7 +49,7 @@ _URL_REFERENCE_RE = re.compile(
 # So the name is ignored, and the choice is made on the content instead.
 _RAW_ASSIGN_RE = re.compile(r"[A-Za-z_]\w*\s*=\s*r\"\"\"([\s\S]*?)\"\"\"")
 
-# A bibliography entry is written one of three ways:
+# A bibliography entry is written one of four ways:
 #
 #   [1] Title.                      the report literal on older share pages
 #   https://…
@@ -59,6 +59,10 @@ _RAW_ASSIGN_RE = re.compile(r"[A-Za-z_]\w*\s*=\s*r\"\"\"([\s\S]*?)\"\"\"")
 #   https://…                       brackets, wrapped title, hard break
 #
 #   1. [Title](https://…) — note.   a downloaded report file in plain GFM
+#
+#   1.  **Org.** Title wrapped\      a downloaded report file, pandoc's
+#       at 72 columns.\               numbered list: no brackets, no link
+#       https://…
 #
 # The bracketed form starts a line (after an optional list marker); its title
 # runs, across lines but no blank one nor one starting another entry, up to
@@ -73,6 +77,14 @@ _BIB_RE = re.compile(
 # list of links elsewhere in a report is not its sources.
 _BIB_LINK_RE = re.compile(
     r"^[ \t]*(\d+)[.)][ \t]+\[((?:[^\[\]\\]|\\.)+)\]\(<?(https?://(?:[^\s()<>]|\([^\s()<>]*\))+)>?\)",
+    re.MULTILINE,
+)
+# The numbered plain form, read only under a bibliography heading too; like
+# the bracketed form its title stops at a blank line or the next entry.
+_BIB_NUMBERED_RE = re.compile(
+    r"^[ \t]*(\d+)[.)][ \t]+"
+    r"((?:(?!\n[ \t]*\n)(?!\n[ \t]*\d+[.)][ \t])[\s\S])+?)"
+    r"\s*\n[ \t]*<?(https?://[^\s>]+)>?",
     re.MULTILINE,
 )
 _HEADING_RE = re.compile(r"^#{1,6}[ \t]+(.*)$", re.MULTILINE)
@@ -194,6 +206,7 @@ class ChatGptParser(ConversationParser):
         entries = _BIB_RE.findall(report)
         for section in _bibliography_sections(report):
             entries += _BIB_LINK_RE.findall(section)
+            entries += _BIB_NUMBERED_RE.findall(section)
         citations: list[Citation] = []
         for n, title, url in entries:
             if all(c.index != int(n) for c in citations):
