@@ -8,6 +8,8 @@ Not a test module (no ``test_`` prefix): the decoder tests import it.
     scripts beside it), with every piece of content replaced by synthetic text.
   * :func:`flight_page` — a React Router page whose ``streamController.enqueue``
     flight payload encodes any object, for the older format.
+  * :class:`NoReportFiles` — a report-file fetcher that finds nothing, for
+    tests of the ingest use case that are not about linked report files.
 """
 
 from __future__ import annotations
@@ -72,3 +74,10 @@ def octane_page(data: object, title: str = "ChatGPT") -> str:
         '<link rel="stylesheet" href="/unauth-mweb/assets/app.css"></head><body>'
         f'<script id="__WEB_MOBILE_DATA__" type="application/json">{blob}</script></body></html>'
     )
+
+
+class NoReportFiles:
+    """A ``ReportFileFetcher`` with nothing to download."""
+
+    async def fetch(self, share_id: str, message_id: str, path: str) -> str | None:
+        return None

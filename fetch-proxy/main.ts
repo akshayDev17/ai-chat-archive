@@ -8,20 +8,20 @@
 //
 // It also fetches the images ChatGPT's GenUI replies show
 // (images.openai.com/static-rsc-*), which the Worker copies into R2: that host is
-// on Cloudflare too, so the Worker is refused there for the same reason.
+// on Cloudflare too, so the Worker is refused there for the same reason. And it
+// fetches a share's linked report file, in the two signed-out hops the share
+// page's own "Download" button makes: the resolver on chatgpt.com, then the
+// short-lived signed blob it answers on sdmntpr*.oaiusercontent.com.
 //
 // Hardened against being an open proxy two ways:
-//   1. it only accepts chatgpt.com/share/*, chat.openai.com/share/* and
-//      images.openai.com/static-rsc-*
+//   1. it only accepts the strict URL shapes in allowlist.ts
 //   2. every request must carry the shared FETCH_TOKEN
 
-const SHARE_ORIGINS = new Set([
-  "https://chatgpt.com",
-  "https://chat.openai.com",
-]);
+import { allowedKind } from "./allowlist.ts";
 
-const IMAGE_ORIGIN = "https://images.openai.com";
-const IMAGE_PATH_PREFIX = "/static-rsc-";
+// The share page caps the resolver's answer at 64 KB too.
+const REPORT_RESOLVER_MAX_BYTES = 64 * 1024;
+const REPORT_FILE_MAX_BYTES = 1024 * 1024;
 
 const USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 " +
@@ -50,13 +50,21 @@ Deno.serve(async (req) => {
     return new Response("bad url", { status: 400 });
   }
 
-  const isImage = parsed.origin === IMAGE_ORIGIN && parsed.pathname.startsWith(IMAGE_PATH_PREFIX);
-  const isShare = SHARE_ORIGINS.has(parsed.origin) && parsed.pathname.startsWith("/share/");
-  if (!isImage && !isShare) {
+  const kind = allowedKind(parsed);
+  if (kind === null) {
     return new Response("not an allowed url", { status: 400 });
   }
 
-  if (isImage) {
+  if (kind === "reportResolver") {
+    return await fetchCapped(parsed, "application/json", REPORT_RESOLVER_MAX_BYTES);
+  }
+
+  if (kind === "reportFile") {
+    // The signed query is part of `parsed`, passed through untouched.
+    return await fetchCapped(parsed, "text/markdown,text/plain", REPORT_FILE_MAX_BYTES);
+  }
+
+  if (kind === "image") {
     // Bounded, so a hung upstream fails this one image instead of outliving
     // the Worker's cron run (which would leave the whole batch stuck copying).
     let image: Response;
@@ -98,3 +106,49 @@ Deno.serve(async (req) => {
     headers: { "content-type": "text/html; charset=utf-8" },
   });
 });
+
+// One report hop: no redirects, bounded in time and in size, and the upstream
+// content type passed through so the Worker can tell a report from an error page.
+async function fetchCapped(url: URL, accept: string, maxBytes: number): Promise<Response> {
+  let upstream: Response;
+  let body: Uint8Array | null;
+  try {
+    upstream = await fetch(url, {
+      headers: { "User-Agent": USER_AGENT, "Accept": accept },
+      redirect: "error",
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (upstream.status !== 200) {
+      await upstream.body?.cancel();
+      return new Response(`upstream ${upstream.status}`, { status: 502 });
+    }
+    body = await readCapped(upstream, maxBytes);
+  } catch {
+    return new Response("upstream failed", { status: 504 });
+  }
+  if (body === null) {
+    return new Response("upstream too large", { status: 502 });
+  }
+  return new Response(body, {
+    status: 200,
+    headers: { "content-type": upstream.headers.get("content-type") ?? "application/octet-stream" },
+  });
+}
+
+// The body, or null once it grows past maxBytes.
+async function readCapped(response: Response, maxBytes: number): Promise<Uint8Array | null> {
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for await (const chunk of response.body ?? []) {
+    size += chunk.byteLength;
+    if (size > maxBytes) return null;
+    chunks.push(chunk);
+  }
+  const body = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return body;
+}

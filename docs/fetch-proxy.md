@@ -72,10 +72,16 @@ browser ──/api/*──▶ Python Worker ──x-fetch-token──▶ Deno pr
  (same-origin)      (parse + D1)                    (non-Cloudflare egress)
 ```
 
-The Deno function only accepts `chatgpt.com/share/*` and
-`chat.openai.com/share/*` (no open proxy / SSRF), requires a shared
-`x-fetch-token` header (**fail-closed** if the token is unset), and returns the
-raw HTML.
+The Deno function only accepts the strict URL shapes in
+`fetch-proxy/allowlist.ts` (no open proxy / SSRF): `chatgpt.com/share/*` and
+`chat.openai.com/share/*` pages, returned as raw HTML; the GenUI images on
+`images.openai.com/static-rsc-*`; and the two signed-out hops that download a
+share's linked report file — the resolver
+`chatgpt.com/backend-anon/share/<uuid>/file_from_message/<uuid>?file_path=/mnt/data/…`
+and the signed blob `sdmntpr*.oaiusercontent.com/files/<id>/raw?<signature>` it
+answers, both size-capped, redirect-refused and returned with their upstream
+content type. Every request needs a shared `x-fetch-token` header
+(**fail-closed** if the token is unset).
 
 ### Reusable setup (≈5 minutes)
 
@@ -120,7 +126,8 @@ repositories — is unchanged, because it never knew which fetcher it was handed
 1. Confirm the diagnosis: `curl` from your machine → 200; Worker `fetch()` →
    403; `wrangler dev --remote` reproduces the 403.
 2. Drop `fetch-proxy/main.ts` into a Deno Deploy app (or any non-Cloudflare
-   host), widening `ALLOWED_ORIGINS` to your target if it is not ChatGPT.
+   host) with its `allowlist.ts`, changing the allowed shapes to your target if
+   it is not ChatGPT.
 3. Set the shared token as a secret on **both** the proxy and your Worker.
 4. Point your fetcher at the proxy.
 5. **Test one request before committing** — the proxy egresses from a datacenter

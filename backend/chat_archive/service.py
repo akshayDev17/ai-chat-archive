@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 
 from .models import Conversation, checked_visibility
-from .ports import ConversationParser, PayloadDecoder, ShareFetcher
+from .ports import ConversationParser, PayloadDecoder, ReportFileFetcher, ShareFetcher
 
 # SSRF guard: only a strict chatgpt.com/share/<uuid> URL is ever fetched.
 _SHARE_URL_RE = re.compile(
@@ -17,6 +17,10 @@ _SHARE_URL_RE = re.compile(
     r"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$",
     re.IGNORECASE,
 )
+
+#: How many linked report files one filing tries, newest first. Each try is
+#: two requests and up to two more on a retry, inside the Worker's budget.
+MAX_REPORT_FILES_TRIED = 3
 
 
 class InvalidShareUrl(ValueError):
@@ -43,16 +47,42 @@ class ShareService:
         fetcher: ShareFetcher,
         decoder: PayloadDecoder,
         parser: ConversationParser,
+        report_fetcher: ReportFileFetcher,
     ):
         self._fetcher = fetcher
         self._decoder = decoder
         self._parser = parser
+        self._report_fetcher = report_fetcher
 
     async def ingest(self, share_url: str) -> Conversation:
+        """File a share: its transcript, and its report wherever it is.
+
+        A page that carries the report keeps it, and nothing more is fetched.
+        Otherwise the report is the newest file a reply links to that can be
+        downloaded — or none, which never fails the filing.
+        """
         share_id = self._extract_share_id(share_url)
         raw = await self._fetcher.fetch(share_id)
         decoded = self._decoder.decode(raw)
-        return self._parser.parse(share_id, decoded)
+        conversation = self._parser.parse(share_id, decoded)
+        if conversation.report is not None:
+            return conversation
+        report_file = await self._download_report_file(share_id, decoded.get("report_files"))
+        if report_file is None:
+            return conversation
+        return self._parser.parse(share_id, decoded, report_file=report_file)
+
+    async def _download_report_file(self, share_id: str, links: object) -> str | None:
+        if not isinstance(links, list):
+            return None
+        for link in list(reversed(links))[:MAX_REPORT_FILES_TRIED]:
+            try:
+                report = await self._report_fetcher.fetch(share_id, link["message_id"], link["path"])
+            except Exception:  # noqa: BLE001 - a report that cannot be had is no report
+                report = None
+            if report:
+                return report
+        return None
 
     @staticmethod
     def _extract_share_id(share_url: str) -> str:

@@ -49,17 +49,44 @@ _URL_REFERENCE_RE = re.compile(
 # So the name is ignored, and the choice is made on the content instead.
 _RAW_ASSIGN_RE = re.compile(r"[A-Za-z_]\w*\s*=\s*r\"\"\"([\s\S]*?)\"\"\"")
 
-# Bibliography entries look like:  [1] Title. \n https://...
-_BIB_RE = re.compile(r"\[(\d+)\]\s+([^\n]+?)\s*\n\s*(https?://\S+)")
+# A bibliography entry is written one of three ways:
+#
+#   [1] Title.                      the report literal on older share pages
+#   https://…
+#
+#   \[1\] Title wrapped at          a downloaded report file, rewritten the
+#   72 columns.\                     way pandoc writes Markdown: escaped
+#   https://…                       brackets, wrapped title, hard break
+#
+#   1. [Title](https://…) — note.   a downloaded report file in plain GFM
+#
+# The bracketed form starts a line (after an optional list marker); its title
+# runs, across lines but no blank one, up to the line holding the URL.
+_BIB_RE = re.compile(
+    r"^[ \t]*(?:[-*+][ \t]+)?\\?\[(\d+)\\?\][ \t]+"
+    r"((?:(?!\n[ \t]*\n)[\s\S])+?)\s*\n[ \t]*<?(https?://[^\s>]+)>?",
+    re.MULTILINE,
+)
+# The numbered-link form, read only under a bibliography heading: a numbered
+# list of links elsewhere in a report is not its sources.
+_BIB_LINK_RE = re.compile(
+    r"^[ \t]*(\d+)[.)][ \t]+\[((?:[^\[\]\\]|\\.)+)\]\(<?(https?://(?:[^\s()<>]|\([^\s()<>]*\))+)>?\)",
+    re.MULTILINE,
+)
+_HEADING_RE = re.compile(r"^#{1,6}[ \t]+(.*)$", re.MULTILINE)
+_BIB_HEADING_RE = re.compile(r"bibliograph|reference|sources|works cited|citations", re.IGNORECASE)
+# A Markdown backslash escape, undone in a title.
+_ESCAPE_RE = re.compile(r"\\([!-/:-@\[-`{-~])")
 
 
 class ChatGptParser(ConversationParser):
     """Extract transcript, report and citations from a ChatGPT conversation."""
 
-    def parse(self, share_id: str, raw: dict) -> Conversation:
+    def parse(self, share_id: str, raw: dict, report_file: str | None = None) -> Conversation:
         title = raw.get("title") or "Untitled"
         messages = self._extract_messages(raw)
-        report = self._extract_report(raw)
+        # The page's own report wins: a downloaded file is only the fallback.
+        report = self._extract_report(raw) or (report_file or "").strip() or None
         citations = self._extract_citations(report)
         return Conversation(
             share_id=share_id,
@@ -162,10 +189,29 @@ class ChatGptParser(ConversationParser):
     def _extract_citations(report: str | None) -> list[Citation]:
         if not report:
             return []
-        return [
-            Citation(index=int(n), title=title.strip(), url=url)
-            for n, title, url in _BIB_RE.findall(report)
-        ]
+        entries = _BIB_RE.findall(report)
+        for section in _bibliography_sections(report):
+            entries += _BIB_LINK_RE.findall(section)
+        citations: list[Citation] = []
+        for n, title, url in entries:
+            if all(c.index != int(n) for c in citations):
+                citations.append(Citation(index=int(n), title=_plain_title(title), url=url))
+        return citations
+
+
+def _bibliography_sections(report: str) -> list[str]:
+    """The text under each heading that names the report's sources."""
+    headings = list(_HEADING_RE.finditer(report))
+    return [
+        report[heading.end() : headings[i + 1].start() if i + 1 < len(headings) else len(report)]
+        for i, heading in enumerate(headings)
+        if _BIB_HEADING_RE.search(heading.group(1))
+    ]
+
+
+def _plain_title(title: str) -> str:
+    """A bibliography title on one line, its Markdown escapes undone."""
+    return _ESCAPE_RE.sub(r"\1", " ".join(title.split()).rstrip("\\").rstrip())
 
 
 def _leading_trim(text: str) -> int:
