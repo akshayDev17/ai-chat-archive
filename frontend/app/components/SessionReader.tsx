@@ -162,6 +162,12 @@ export default function SessionReader({
   if (error) return <div className="status error">{error}</div>;
   if (!session) return <p className="fine">Opening the story…</p>;
 
+  // A story with no report (a reportless chat, or a report that could not be
+  // downloaded) has no Report tab: it opens on the transcript instead of an
+  // empty page. The URL is left as it is, so nothing rewrites a shared link.
+  const hasReport = Boolean(session.report?.trim());
+  const view: ReaderMode = hasReport ? mode : 'chat';
+
   return (
     <article className="reader">
       <div className="reader-top">
@@ -185,11 +191,11 @@ export default function SessionReader({
         ) : null}
       </div>
 
-      <div className="kicker">{mode === 'report' ? 'The report' : 'The transcript'}</div>
+      <div className="kicker">{view === 'report' ? 'The report' : 'The transcript'}</div>
       <h1 className="hl">{session.title}</h1>
       <div className="byline">
         {session.source.toUpperCase()}
-        {mode === 'report'
+        {view === 'report'
           ? session.citations.length
             ? ` · ${session.citations.length} CITATIONS`
             : ''
@@ -199,25 +205,27 @@ export default function SessionReader({
       </div>
 
       <div className="rtoggle" role="tablist" aria-label="View">
+        {hasReport ? (
+          <button
+            role="tab"
+            aria-selected={view === 'report'}
+            className={view === 'report' ? 'on' : ''}
+            onClick={() => selectMode('report')}
+          >
+            Report
+          </button>
+        ) : null}
         <button
           role="tab"
-          aria-selected={mode === 'report'}
-          className={mode === 'report' ? 'on' : ''}
-          onClick={() => selectMode('report')}
-        >
-          Report
-        </button>
-        <button
-          role="tab"
-          aria-selected={mode === 'chat'}
-          className={mode === 'chat' ? 'on' : ''}
+          aria-selected={view === 'chat'}
+          className={view === 'chat' ? 'on' : ''}
           onClick={() => selectMode('chat')}
         >
           Chat
         </button>
       </div>
 
-      {mode === 'report' ? (
+      {view === 'report' ? (
         <div className="report">
           <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]} components={MARKDOWN_COMPONENTS}>
             {report}
