@@ -14,6 +14,10 @@ The flight payload is a flat JSON array where:
   * a list is an array whose elements are indices into data,
   * a negative integer (-5) means ``None`` (undefined),
   * an integer >= len(data) is a literal number (e.g. a timestamp).
+
+Either way the decoded conversation carries ``report_files``: the report files
+its replies link to, as ``[{"message_id", "path"}]`` (see
+:func:`.web_mobile.report_links`), oldest first.
 """
 
 from __future__ import annotations
@@ -29,7 +33,12 @@ from .page_diagnostic import (
     log_sample,
     payload_log_sample,
 )
-from .web_mobile import conversation_from_web_mobile, web_mobile_conversation, web_mobile_payload
+from .web_mobile import (
+    conversation_from_web_mobile,
+    report_links,
+    web_mobile_conversation,
+    web_mobile_payload,
+)
 
 # Matches `streamController.enqueue("...")` and captures the JS string literal.
 _ENQUEUE_RE = re.compile(r'streamController\.enqueue\("((?:[^"\\]|\\.)*)"\)')
@@ -143,7 +152,7 @@ class ChatGptShareDecoder(PayloadDecoder):
             raise self._missing(
                 html, payload, "flight", root, self._FLIGHT_PATH, payload_log_sample(root, self._FLIGHT_PATH)
             )
-        return conversation
+        return {**conversation, "report_files": _flight_report_links(conversation)}
 
     def _decode_web_mobile(self, html: str, payload: str) -> dict:
         try:
@@ -170,6 +179,27 @@ class ChatGptShareDecoder(PayloadDecoder):
     def _enqueued_chunks(html: str) -> list[str]:
         # Unescape each JS string literal by re-quoting it as JSON.
         return [json.loads('"' + m.group(1) + '"') for m in _ENQUEUE_RE.finditer(html)]
+
+
+def _flight_report_links(conversation: dict) -> list[dict]:
+    """The report files linked from the replies on the conversation's current branch."""
+    mapping = conversation.get("mapping") if isinstance(conversation.get("mapping"), dict) else {}
+    chain: list[dict] = []
+    node_id = conversation.get("current_node")
+    while isinstance(node_id, str) and node_id in mapping and len(chain) < len(mapping):
+        node = mapping[node_id] if isinstance(mapping[node_id], dict) else {}
+        chain.insert(0, node)
+        node_id = node.get("parent")
+    links: list[dict] = []
+    for node in chain:
+        message = node.get("message") if isinstance(node.get("message"), dict) else {}
+        if (message.get("author") or {}).get("role") != "assistant":
+            continue
+        content = message.get("content") if isinstance(message.get("content"), dict) else {}
+        text = "\n".join(part for part in content.get("parts") or [] if isinstance(part, str))
+        app_data = ((message.get("metadata") or {}).get("model_dil_v2") or {}).get("appData")
+        links += report_links(message.get("id"), app_data, text)
+    return links
 
 
 def _follow(root: object, path: tuple) -> object:

@@ -23,6 +23,10 @@ that — a ``mapping``/``current_node`` chain whose messages hold the original
 text and ``metadata.content_references`` — so the parser serves both page
 formats unchanged. A GenUI reply (``source.dil``) is turned back into its
 markup by :mod:`.dil`.
+
+The page carries no report body. The chat-to-markdown report is only linked,
+as a file in the reply's sandbox (``sandbox:/mnt/data/<name>.md``);
+:func:`report_links` finds those links so the file can be downloaded.
 """
 
 from __future__ import annotations
@@ -35,6 +39,13 @@ _WEB_MOBILE_DATA_RE = re.compile(
     r'<script\b[^>]*\bid="__WEB_MOBILE_DATA__"[^>]*>(.*?)</script\s*>',
     re.IGNORECASE | re.DOTALL,
 )
+
+
+# A report link, as the reply's Markdown spells it: ``[label](sandbox:/mnt/…)``.
+_SANDBOX_LINK_RE = re.compile(r"\]\(\s*<?(sandbox:/mnt/data/[^)\s>]+)")
+# A Markdown backslash escape.
+_ESCAPE_RE = re.compile(r"\\([!-/:-@\[-`{-~])")
+_REPORT_PATH_RE = re.compile(r"^/mnt/data/(?:[^/]+/)*[^/]+\.md$", re.IGNORECASE)
 
 
 def web_mobile_payload(html: str) -> str | None:
@@ -67,7 +78,70 @@ def conversation_from_web_mobile(conversation: dict) -> dict:
         parent = node_id
     shared = conversation.get("sharedContent")
     title = conversation.get("title") or (shared.get("title") if isinstance(shared, dict) else None)
-    return {"title": title, "mapping": mapping, "current_node": parent}
+    return {
+        "title": title,
+        "mapping": mapping,
+        "current_node": parent,
+        "report_files": _octane_report_links(conversation["messages"]),
+    }
+
+
+def report_links(message_id: object, app_data: object, text: object) -> list[dict]:
+    """The report files one reply links to: ``[{"message_id", "path"}]``.
+
+    A GenUI reply resolves its ``<Link/>`` in ``appData.opGenui.componentResults``
+    — ``{"componentName": "Link", "state": {"url": "sandbox:/mnt/data/….md"}}`` —
+    and that is read first. The reply's Markdown spells the same link as
+    ``[…](sandbox:/mnt/data/….md)``, read as the fallback once its escapes are
+    undone: a copy ending ``….md\\`` was seen live, and the resolver answers
+    404 for that path and 200 for the clean one.
+    """
+    if not isinstance(message_id, str) or not message_id:
+        return []
+    urls = _link_component_urls(app_data)
+    if isinstance(text, str):
+        urls += _SANDBOX_LINK_RE.findall(text)
+    links: list[dict] = []
+    for url in urls:
+        path = _report_path(url)
+        if path is not None and all(link["path"] != path for link in links):
+            links.append({"message_id": message_id, "path": path})
+    return links
+
+
+def _octane_report_links(messages: list) -> list[dict]:
+    links: list[dict] = []
+    for message in messages:
+        if not isinstance(message, dict) or message.get("role") != "assistant":
+            continue
+        source = message.get("source") if isinstance(message.get("source"), dict) else {}
+        dil = source.get("dil") if isinstance(source.get("dil"), dict) else {}
+        links += report_links(message.get("id"), dil.get("appData"), message.get("content"))
+    return links
+
+
+def _link_component_urls(app_data: object) -> list[str]:
+    genui = app_data.get("opGenui") if isinstance(app_data, dict) else None
+    results = genui.get("componentResults") if isinstance(genui, dict) else None
+    if not isinstance(results, dict):
+        return []
+    urls: list[str] = []
+    for result in results.values():
+        if not isinstance(result, dict) or result.get("componentName") != "Link":
+            continue
+        state = result.get("state")
+        url = state.get("url") if isinstance(state, dict) else None
+        if isinstance(url, str):
+            urls.append(url)
+    return urls
+
+
+def _report_path(url: str) -> str | None:
+    """The sandbox path of a report link, or ``None`` when it is not one."""
+    path = _ESCAPE_RE.sub(r"\1", url.strip()).rstrip("\\").removeprefix("sandbox:")
+    if not _REPORT_PATH_RE.match(path) or "/../" in path or "/./" in path:
+        return None
+    return path
 
 
 def _message(message: dict) -> dict:

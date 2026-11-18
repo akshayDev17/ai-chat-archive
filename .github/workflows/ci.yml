@@ -65,6 +65,17 @@ jobs:
         working-directory: backend
         run: uv run pytest -q
 
+      # ── fetch proxy ──────────────────────────────────────────────────────
+      # Its allowlist is what keeps it from being an open proxy, so the shapes
+      # it accepts and refuses are tested, and main.ts is type-checked.
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Fetch proxy — allowlist tests and type-check
+        working-directory: fetch-proxy
+        run: deno test && deno check main.ts
+
       # ── frontend ─────────────────────────────────────────────────────────
       - uses: actions/setup-node@v4
         with:

@@ -13,11 +13,18 @@ the Worker (``js.fetch``) and in plain Python (urllib).
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any, Awaitable, Callable
 from urllib.parse import quote
 
-from ..ports import ImageFetcher, ShareFetcher
-from .fetcher import DEFAULT_USER_AGENT, FetchError
+from ..ports import ImageFetcher, ReportFileFetcher, ShareFetcher
+from .fetcher import (
+    DEFAULT_USER_AGENT,
+    FetchError,
+    SleepCallable,
+    download_report_file,
+    report_resolver_url,
+)
 
 FetchCallable = Callable[..., Awaitable[Any]]
 
@@ -84,6 +91,44 @@ class ProxyImageFetcher(ImageFetcher):
             raise FetchError(f"proxy fetch failed: HTTP {status}")
         data = (await response.arrayBuffer()).to_bytes()
         return data, response.headers.get("content-type") or ""
+
+
+class ProxyReportFetcher(ReportFileFetcher):
+    """Download a linked report file through the same Deno proxy.
+
+    Both hops — the resolver on chatgpt.com and the signed blob on
+    ``sdmntpr*.oaiusercontent.com`` — are on Cloudflare, so the Worker is
+    refused at each and both go through the proxy. The proxy sets the upstream
+    ``Accept``, refuses redirects, caps each body and returns the upstream
+    ``content-type``; the signed URL passes through it once and is never kept.
+    """
+
+    def __init__(self, fetch_func: FetchCallable, proxy_base_url: str, token: str,
+                 sleep: SleepCallable = asyncio.sleep, user_agent: str = DEFAULT_USER_AGENT):
+        self._fetch = fetch_func
+        self._proxy_base_url = proxy_base_url.rstrip("/")
+        self._token = token
+        self._sleep = sleep
+        self._user_agent = user_agent
+
+    async def fetch(self, share_id: str, message_id: str, path: str) -> str | None:
+        return await download_report_file(
+            self._get, report_resolver_url(share_id, message_id, path), self._sleep
+        )
+
+    async def _get(self, url: str, accept: str, max_bytes: int) -> tuple[int, str, str]:
+        response = await self._fetch(
+            f"{self._proxy_base_url}/?u={quote(url, safe='')}",
+            headers={"x-fetch-token": self._token, "user-agent": self._user_agent},
+            redirect="follow",
+        )
+        status = getattr(response, "status", None)
+        if status != 200:
+            return status or 0, "", ""
+        body = await response.text()
+        if len(body) > max_bytes:
+            raise FetchError(f"report fetch over {max_bytes} bytes")
+        return status, response.headers.get("content-type") or "", body
 
 
 def make_worker_fetch() -> FetchCallable:

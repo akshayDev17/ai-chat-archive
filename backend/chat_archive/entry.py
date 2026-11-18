@@ -48,7 +48,12 @@ from workers import Response, WorkerEntrypoint
 from .auth import CloudflareAccessIdentity
 from .chatgpt.decoder import ChatGptShareDecoder
 from .chatgpt.parser import ChatGptParser
-from .chatgpt.proxy_fetcher import ProxyImageFetcher, ProxyShareFetcher, make_worker_fetch
+from .chatgpt.proxy_fetcher import (
+    ProxyImageFetcher,
+    ProxyReportFetcher,
+    ProxyShareFetcher,
+    make_worker_fetch,
+)
 from .ingest_failure import ingest_failure_body
 from .media_copier import copy_pending, retract_story
 from .r2_media_store import R2MediaStore
@@ -91,6 +96,7 @@ class Default(WorkerEntrypoint):
             fetcher=ProxyShareFetcher(make_worker_fetch(), proxy_base or "", token or ""),
             decoder=ChatGptShareDecoder(),
             parser=ChatGptParser(),
+            report_fetcher=ProxyReportFetcher(make_worker_fetch(), proxy_base or "", token or ""),
         )
 
     def _repository(self) -> D1ConversationRepository:

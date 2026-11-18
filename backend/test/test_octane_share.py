@@ -38,7 +38,7 @@ from chat_archive.chatgpt.dil import UnsupportedDil, render_dil  # noqa: E402
 from chat_archive.chatgpt.parser import ChatGptParser  # noqa: E402
 from chat_archive.chatgpt.web_mobile import original_text  # noqa: E402
 from chat_archive.service import ShareService  # noqa: E402
-from share_pages import OCTANE_SHARE, flight_share, octane_page  # noqa: E402
+from share_pages import OCTANE_SHARE, NoReportFiles, flight_share, octane_page  # noqa: E402
 
 SHARE_ID = "00000000-0000-4000-8000-0000000000f1"
 
@@ -265,7 +265,7 @@ class BothFormats(unittest.TestCase):
             async def fetch(self, share_id: str) -> str:
                 return OCTANE_SHARE
 
-        service = ShareService(Fetcher(), ChatGptShareDecoder(), ChatGptParser())
+        service = ShareService(Fetcher(), ChatGptShareDecoder(), ChatGptParser(), NoReportFiles())
         conversation = asyncio.run(service.ingest(f"https://chatgpt.com/share/{SHARE_ID}"))
         self.assertEqual(conversation.share_id, SHARE_ID)
         self.assertEqual(len(conversation.messages), 4)

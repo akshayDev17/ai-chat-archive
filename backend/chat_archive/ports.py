@@ -33,8 +33,29 @@ class ConversationParser(ABC):
     """Parse a decoded conversation dict into domain models."""
 
     @abstractmethod
-    def parse(self, share_id: str, raw: dict) -> Conversation:
-        """Build a :class:`Conversation` from the decoded dict."""
+    def parse(self, share_id: str, raw: dict, report_file: str | None = None) -> Conversation:
+        """Build a :class:`Conversation` from the decoded dict.
+
+        ``report_file`` is the report downloaded from a file the conversation
+        links to. It is used only when the page itself carries no report.
+        """
+
+
+class ReportFileFetcher(ABC):
+    """Download a report file a shared conversation links to.
+
+    Each entry of the decoded dict's ``report_files`` is one such link:
+    ``{"message_id": …, "path": …}``, naming the reply that links it and the
+    file's path in that reply's sandbox.
+    """
+
+    @abstractmethod
+    async def fetch(self, share_id: str, message_id: str, path: str) -> str | None:
+        """The file's Markdown, or ``None`` when it cannot be had.
+
+        Never raises: a report that cannot be downloaded is no report, and
+        never a failed import.
+        """
 
 
 class ConversationRepository(ABC):

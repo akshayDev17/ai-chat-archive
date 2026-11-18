@@ -56,7 +56,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from chat_archive.chatgpt.decoder import ChatGptShareDecoder
-from chat_archive.chatgpt.fetcher import HttpImageFetcher, HttpShareFetcher
+from chat_archive.chatgpt.fetcher import HttpImageFetcher, HttpReportFetcher, HttpShareFetcher
 from chat_archive.chatgpt.parser import ChatGptParser
 from chat_archive.ingest_failure import ingest_failure_body
 from chat_archive.local_media_store import DirectoryMediaStore
@@ -149,6 +149,7 @@ service = ShareService(
     fetcher=HttpShareFetcher(make_local_fetch()),
     decoder=ChatGptShareDecoder(),
     parser=ChatGptParser(),
+    report_fetcher=HttpReportFetcher(),
 )
 
 

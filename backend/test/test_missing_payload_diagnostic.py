@@ -50,6 +50,7 @@ from chat_archive.local_media_store import MemoryMediaStore  # noqa: E402
 from chat_archive.repository import D1ConversationRepository  # noqa: E402
 from chat_archive.service import ShareService  # noqa: E402
 from chat_archive.sqlite_repository import SqliteConversationRepository  # noqa: E402
+from share_pages import NoReportFiles  # noqa: E402
 from test_ownership import FakeD1  # noqa: E402
 from test_visibility_routes import _Worker, local_server  # noqa: E402
 
@@ -221,7 +222,7 @@ class _PageFetcher:
 
 def page_service(html: str) -> ShareService:
     """The real ingest path — decoder and parser — over a canned page."""
-    return ShareService(_PageFetcher(html), ChatGptShareDecoder(), ChatGptParser())
+    return ShareService(_PageFetcher(html), ChatGptShareDecoder(), ChatGptParser(), NoReportFiles())
 
 
 class MissingPayloadRoutes:

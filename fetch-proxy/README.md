@@ -9,9 +9,15 @@ ranges.
 Deployed on [Deno Deploy](https://deno.com/deploy) (free, no card) so the request
 egresses from a non-Cloudflare datacenter IP instead of from the Worker.
 
-- `main.ts` — the function. `GET /?u=<encoded chatgpt share url>` returns the raw
-  HTML; gated by an `x-fetch-token` header (fail-closed if unset), and only
-  accepts `chatgpt.com/share/*` / `chat.openai.com/share/*`.
+- `main.ts` — the function. `GET /?u=<encoded url>` returns the target's body;
+  gated by an `x-fetch-token` header (fail-closed if unset). For a share page
+  that is the raw HTML; it also fetches GenUI images and the two hops of a
+  share's linked report file (resolver, then signed blob).
+- `allowlist.ts` — the only URL shapes it accepts: `chatgpt.com/share/*` /
+  `chat.openai.com/share/*`, `images.openai.com/static-rsc-*`,
+  `chatgpt.com/backend-anon/share/<uuid>/file_from_message/<uuid>?file_path=/mnt/data/…`
+  and `sdmntpr*.oaiusercontent.com/files/<id>/raw?<signature>`.
+  `allowlist_test.ts` pins them: `deno test` here.
 
 **Full explanation, the three walls (fetch 403 / socket block / CORS), the
 reusable setup, and a "reuse it for another project" checklist →
