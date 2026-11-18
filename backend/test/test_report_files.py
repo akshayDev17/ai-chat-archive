@@ -310,8 +310,17 @@ class ReportFiles:
         return found
 
 
-def ingest(html: str, files: ReportFiles):
-    service = ShareService(PageFetcher(html), ChatGptShareDecoder(), ChatGptParser(), files)
+class NeverAnswers:
+    """A ``ReportFileFetcher`` whose fetch never returns."""
+
+    async def fetch(self, share_id: str, message_id: str, path: str) -> str | None:
+        await asyncio.Event().wait()
+
+
+def ingest(html: str, files, report_budget: float = 30.0):
+    service = ShareService(
+        PageFetcher(html), ChatGptShareDecoder(), ChatGptParser(), files, report_budget=report_budget
+    )
     return run(service.ingest(f"https://chatgpt.com/share/{SHARE_ID}"))
 
 
@@ -334,6 +343,14 @@ class IngestingALinkedReport(unittest.TestCase):
                 self.assertIsNone(conversation.report)
                 self.assertEqual(conversation.citations, [])
                 self.assertEqual(len(conversation.messages), 4)
+
+    def test_a_report_fetch_that_never_returns_still_files_the_share_in_its_budget(self):
+        conversation = ingest(
+            octane_with_report_link(component_url=f"sandbox:{REPORT_PATH}"), NeverAnswers(), report_budget=0.05
+        )
+        self.assertIsNone(conversation.report)
+        self.assertEqual(conversation.citations, [])
+        self.assertEqual(len(conversation.messages), 4)
 
     def test_a_page_with_no_link_downloads_nothing(self):
         files = ReportFiles({})
@@ -416,6 +433,23 @@ class CitationsInADownloadedReport(unittest.TestCase):
     def test_a_numbered_list_of_links_outside_the_bibliography_is_not_its_sources(self):
         report = "# R\n\n## Reading list\n\n1. [A](https://example.com/a)\n2. [B](https://example.com/b)\n"
         self.assertEqual(citations(report), [])
+
+    def test_an_entry_without_a_url_does_not_swallow_the_next_one(self):
+        for escape in ("", "\\"):
+            with self.subTest(escape=escape):
+                o, c = f"{escape}[", f"{escape}]"
+                report = (
+                    f"{o}1{c} A book, no link.\n{o}2{c} AP. Another.\nhttps://ap.example/x\n"
+                    f"- {o}3{c} Reuters.\nhttps://r.example/y\n- {o}4{c} No link either.\n{o}5{c} BBC.\nhttps://b.example/z\n"
+                )
+                self.assertEqual(
+                    citations(report),
+                    [
+                        (2, "AP. Another.", "https://ap.example/x"),
+                        (3, "Reuters.", "https://r.example/y"),
+                        (5, "BBC.", "https://b.example/z"),
+                    ],
+                )
 
     def test_an_inline_marker_in_the_body_is_not_an_entry(self):
         report = "# R\n\nA claim. [1]\nhttps://example.com/not-an-entry\n"

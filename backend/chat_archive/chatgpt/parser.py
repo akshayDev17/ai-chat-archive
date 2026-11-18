@@ -61,10 +61,12 @@ _RAW_ASSIGN_RE = re.compile(r"[A-Za-z_]\w*\s*=\s*r\"\"\"([\s\S]*?)\"\"\"")
 #   1. [Title](https://…) — note.   a downloaded report file in plain GFM
 #
 # The bracketed form starts a line (after an optional list marker); its title
-# runs, across lines but no blank one, up to the line holding the URL.
+# runs, across lines but no blank one nor one starting another entry, up to
+# the line holding the URL.
 _BIB_RE = re.compile(
     r"^[ \t]*(?:[-*+][ \t]+)?\\?\[(\d+)\\?\][ \t]+"
-    r"((?:(?!\n[ \t]*\n)[\s\S])+?)\s*\n[ \t]*<?(https?://[^\s>]+)>?",
+    r"((?:(?!\n[ \t]*\n)(?!\n[ \t]*(?:[-*+][ \t]+)?\\?\[\d+\\?\])[\s\S])+?)"
+    r"\s*\n[ \t]*<?(https?://[^\s>]+)>?",
     re.MULTILINE,
 )
 # The numbered-link form, read only under a bibliography heading: a numbered

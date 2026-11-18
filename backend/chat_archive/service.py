@@ -6,6 +6,7 @@ composition root (entry.py) can swap in any vendor or repository.
 
 from __future__ import annotations
 
+import asyncio
 import re
 
 from .models import Conversation, checked_visibility
@@ -19,8 +20,11 @@ _SHARE_URL_RE = re.compile(
 )
 
 #: How many linked report files one filing tries, newest first. Each try is
-#: two requests and up to two more on a retry, inside the Worker's budget.
+#: two requests and up to two more on a retry.
 MAX_REPORT_FILES_TRIED = 3
+
+#: Seconds all the tries together may take before the share files with no report.
+REPORT_DOWNLOAD_BUDGET = 30.0
 
 
 class InvalidShareUrl(ValueError):
@@ -48,11 +52,13 @@ class ShareService:
         decoder: PayloadDecoder,
         parser: ConversationParser,
         report_fetcher: ReportFileFetcher,
+        report_budget: float = REPORT_DOWNLOAD_BUDGET,
     ):
         self._fetcher = fetcher
         self._decoder = decoder
         self._parser = parser
         self._report_fetcher = report_fetcher
+        self._report_budget = report_budget
 
     async def ingest(self, share_url: str) -> Conversation:
         """File a share: its transcript, and its report wherever it is.
@@ -75,6 +81,12 @@ class ShareService:
     async def _download_report_file(self, share_id: str, links: object) -> str | None:
         if not isinstance(links, list):
             return None
+        try:
+            return await asyncio.wait_for(self._first_report_file(share_id, links), self._report_budget)
+        except asyncio.TimeoutError:
+            return None
+
+    async def _first_report_file(self, share_id: str, links: list) -> str | None:
         for link in list(reversed(links))[:MAX_REPORT_FILES_TRIED]:
             try:
                 report = await self._report_fetcher.fetch(share_id, link["message_id"], link["path"])
