@@ -64,8 +64,9 @@ None of them are fixable from our side.
 ## The fix: a token-gated off-Cloudflare proxy
 
 The request must originate from somewhere that is (1) not Cloudflare and (2) not
-bot-flagged by the target. A ~60-line function on Deno Deploy (free, no card)
-does it. It lives in `fetch-proxy/main.ts` in this repo.
+bot-flagged by the target. A small function on Deno Deploy (free, no card)
+does it. It lives in `fetch-proxy/` in this repo: `main.ts`, with its URL
+allowlist in `allowlist.ts`.
 
 ```
 browser ──/api/*──▶ Python Worker ──x-fetch-token──▶ Deno proxy ──▶ chatgpt.com

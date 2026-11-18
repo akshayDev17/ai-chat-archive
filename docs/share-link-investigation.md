@@ -14,6 +14,7 @@ link and must extract the full conversation. Every claim is tagged **CONFIRMED**
   (name, MIME type, size) but **not the file bytes**. Bytes sit behind `sediment://`
   pointers that resolve only to an **authenticated** session. An anonymous Worker cannot
   download a generated markdown/code artifact; it can only report that the file exists.
+  (A reply's `sandbox:/mnt/data/…` link is the exception: it downloads signed out — see §4.)
 - The share page is a client-rendered React SPA with the conversation embedded server-side
   in an index-deduplicated string table (not readable prose), so a plain HTTP scraper must
   parse that table or call the JSON endpoint.
@@ -147,6 +148,12 @@ share viewers cannot download them.
 files (filename, MIME type, size) but **cannot obtain their contents** without the user's
 ChatGPT session token/cookie. To deliver actual artifacts the Worker must either accept a
 user-supplied access token/cookie, or degrade to showing the file list only.
+
+**Later finding — sandbox files are not gated.** A file a reply links as
+`sandbox:/mnt/data/<name>` downloads signed out, through the share page's own
+`backend-anon/share/<share>/file_from_message/<message>` resolver and the
+short-lived signed blob URL it answers. The importer uses this for a linked
+report file; the two hops are documented in `backend/chat_archive/chatgpt/fetcher.py`.
 
 (Related upstream reports about generated-file download fragility in general, for context:
 <https://github.com/openai/codex/issues/48862>,
